@@ -20,7 +20,7 @@ use crate::{
 use agent_settings::{AgentSettings, UserAgentsMd};
 use anyhow::Context as _;
 use askpass::AskPassDelegate;
-use client::zed_urls;
+use client::{rubiks_account::RubiksAccount, zed_urls};
 use collections::{BTreeMap, HashMap, HashSet};
 use db::kvp::KeyValueStore;
 use editor::{Editor, EditorElement, EditorMode, MultiBuffer, MultiBufferOffset, SizingBehavior};
@@ -4678,22 +4678,57 @@ impl GitPanel {
         AskPassDelegate::new_with_cancellation(
             &mut cx.to_async(),
             move |prompt, tx, cancellation, cx| {
-                window
-                    .update(cx, |_, window, cx| {
-                        workspace.update(cx, |workspace, cx| {
-                            workspace.toggle_modal(window, cx, |window, cx| {
-                                AskPassModal::new(
-                                    operation.clone(),
-                                    prompt.into(),
-                                    tx,
-                                    cancellation,
-                                    window,
-                                    cx,
-                                )
-                            });
-                        })
-                    })
-                    .ok();
+                let show_modal = {
+                    let workspace = workspace.clone();
+                    let operation = operation.clone();
+                    move |prompt: String,
+                          tx: futures::channel::oneshot::Sender<askpass::EncryptedPassword>,
+                          cancellation,
+                          cx: &mut AsyncApp| {
+                        window
+                            .update(cx, |_, window, cx| {
+                                workspace.update(cx, |workspace, cx| {
+                                    workspace.toggle_modal(window, cx, |window, cx| {
+                                        AskPassModal::new(
+                                            operation.clone(),
+                                            prompt.into(),
+                                            tx,
+                                            cancellation,
+                                            window,
+                                            cx,
+                                        )
+                                    });
+                                })
+                            })
+                            .ok();
+                    }
+                };
+
+                // github.com over HTTPS: answer with the user's Rubiks GitHub access,
+                // falling back to asking them if that is unavailable.
+                let rubiks_answer = cx.update(|cx| {
+                    RubiksAccount::global(cx)
+                        .and_then(|account| account.read(cx).answer_git_prompt(&prompt, cx))
+                });
+                let Some(rubiks_answer) = rubiks_answer else {
+                    show_modal(prompt, tx, cancellation, cx);
+                    return;
+                };
+                cx.spawn(async move |cx| {
+                    match rubiks_answer
+                        .await
+                        .and_then(|answer| askpass::EncryptedPassword::try_from(answer.as_str()))
+                    {
+                        Ok(answer) => {
+                            tx.send(answer).ok();
+                        }
+                        Err(error) => {
+                            log::warn!("could not answer git with Rubiks GitHub access: {error:#}");
+                            show_modal(prompt, tx, cancellation, cx);
+                        }
+                    }
+                })
+                .detach();
             },
         )
     }

@@ -182,7 +182,12 @@ pub trait Fs: Send + Sync {
     ) -> Result<Arc<dyn GitRepository>>;
     async fn git_init(&self, abs_work_directory: &Path, fallback_branch_name: String)
     -> Result<()>;
-    async fn git_clone(&self, abs_work_directory: &Path, repo_url: &str) -> Result<()>;
+    async fn git_clone(
+        &self,
+        abs_work_directory: &Path,
+        repo_url: &str,
+        credentials: Option<GitCredentials>,
+    ) -> Result<()>;
     async fn git_config(&self, abs_work_directory: &Path, args: Vec<String>) -> Result<String>;
     fn is_fake(&self) -> bool;
     async fn is_case_sensitive(&self) -> bool;
@@ -283,6 +288,23 @@ impl dyn Fs {
     /// Sets the global [`Fs`].
     pub fn set_global(fs: Arc<Self>, cx: &mut App) {
         cx.set_global(GlobalFs(fs));
+    }
+}
+
+/// HTTPS credentials for one git command. They reach git through a credential
+/// helper that reads them from the process environment, so they are never put
+/// on the command line, in the repository's config, or in a credential store.
+#[derive(Clone)]
+pub struct GitCredentials {
+    pub username: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for GitCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GitCredentials")
+            .field("username", &self.username)
+            .finish_non_exhaustive()
     }
 }
 
@@ -1264,7 +1286,12 @@ impl Fs for RealFs {
         Ok(())
     }
 
-    async fn git_clone(&self, abs_work_directory: &Path, repo_url: &str) -> Result<()> {
+    async fn git_clone(
+        &self,
+        abs_work_directory: &Path,
+        repo_url: &str,
+        credentials: Option<GitCredentials>,
+    ) -> Result<()> {
         let job_id = self.next_job_id.fetch_add(1, Ordering::SeqCst);
         let job_info = JobInfo {
             id: job_id,
@@ -1273,8 +1300,22 @@ impl Fs for RealFs {
         };
 
         let job_tracker = JobTracker::new(job_info, self.job_event_subscribers.clone());
-        let mut child = new_command("git")
-            .current_dir(abs_work_directory)
+        let mut command = new_command("git");
+        command.current_dir(abs_work_directory);
+        if let Some(credentials) = credentials {
+            // The empty helper drops the user's configured helpers for this command,
+            // so the password is neither looked up elsewhere nor saved to a keychain.
+            command
+                .args([
+                    "-c",
+                    "credential.helper=",
+                    "-c",
+                    "credential.helper=!f() { test \"$1\" = get && printf 'username=%s\\npassword=%s\\n' \"$ZED_GIT_USERNAME\" \"$ZED_GIT_PASSWORD\"; }; f",
+                ])
+                .env("ZED_GIT_USERNAME", credentials.username)
+                .env("ZED_GIT_PASSWORD", credentials.password);
+        }
+        let mut child = command
             .args(["clone", "--progress", repo_url])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -3401,7 +3442,12 @@ impl Fs for FakeFs {
         self.create_dir(&abs_work_directory_path.join(".git")).await
     }
 
-    async fn git_clone(&self, _abs_work_directory: &Path, _repo_url: &str) -> Result<()> {
+    async fn git_clone(
+        &self,
+        _abs_work_directory: &Path,
+        _repo_url: &str,
+        _credentials: Option<GitCredentials>,
+    ) -> Result<()> {
         anyhow::bail!("Git clone is not supported in fake Fs")
     }
 

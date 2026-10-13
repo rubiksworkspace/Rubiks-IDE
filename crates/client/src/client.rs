@@ -3,6 +3,7 @@ pub mod test;
 
 mod llm_token;
 mod proxy;
+pub mod rubiks_account;
 pub mod telemetry;
 pub mod user;
 pub mod zed_urls;
@@ -91,9 +92,9 @@ pub const CONNECTION_TIMEOUT: Duration = Duration::from_secs(20);
 actions!(
     client,
     [
-        /// Signs in to Zed account.
+        /// Signs in to your Rubiks account with GitHub.
         SignIn,
-        /// Signs out of Zed account.
+        /// Signs out of your Rubiks account.
         SignOut,
         /// Reconnects to the collaboration server.
         Reconnect
@@ -164,25 +165,21 @@ impl Settings for ProxySettings {
 }
 
 pub fn init(client: &Arc<Client>, cx: &mut App) {
+    // Rubiks IDE: the account is the Rubiks gateway's GitHub sign-in, not zed.dev.
+    rubiks_account::init(client, cx);
     let client = Arc::downgrade(client);
-    cx.on_action({
-        let client = client.clone();
-        move |_: &SignIn, cx| {
-            if let Some(client) = client.upgrade() {
-                cx.spawn(async move |cx| client.sign_in_with_optional_connect(true, cx).await)
-                    .detach_and_log_err(cx);
-            }
+    cx.on_action(move |_: &SignIn, cx| {
+        if let Some(account) = rubiks_account::RubiksAccount::global(cx) {
+            account
+                .update(cx, |account, cx| account.sign_in(cx))
+                .detach_and_log_err(cx);
         }
     })
-    .on_action({
-        let client = client.clone();
-        move |_: &SignOut, cx| {
-            if let Some(client) = client.upgrade() {
-                cx.spawn(async move |cx| {
-                    client.sign_out(cx).await;
-                })
+    .on_action(move |_: &SignOut, cx| {
+        if let Some(account) = rubiks_account::RubiksAccount::global(cx) {
+            account
+                .update(cx, |account, cx| account.sign_out(cx))
                 .detach();
-            }
         }
     })
     .on_action({

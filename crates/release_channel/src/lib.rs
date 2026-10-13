@@ -205,10 +205,10 @@ impl ReleaseChannel {
     /// Returns the display name for this [`ReleaseChannel`].
     pub fn display_name(&self) -> &'static str {
         match self {
-            ReleaseChannel::Dev => "Zed Dev",
-            ReleaseChannel::Nightly => "Zed Nightly",
-            ReleaseChannel::Preview => "Zed Preview",
-            ReleaseChannel::Stable => "Zed",
+            ReleaseChannel::Dev => "Rubiks IDE Dev",
+            ReleaseChannel::Nightly => "Rubiks IDE Nightly",
+            ReleaseChannel::Preview => "Rubiks IDE Preview",
+            ReleaseChannel::Stable => "Rubiks IDE",
         }
     }
 
@@ -230,7 +230,8 @@ impl ReleaseChannel {
             ReleaseChannel::Dev => "dev.zed.Zed-Dev",
             ReleaseChannel::Nightly => "dev.zed.Zed-Nightly",
             ReleaseChannel::Preview => "dev.zed.Zed-Preview",
-            ReleaseChannel::Stable => "dev.zed.Zed",
+            // Distinct from Zed's "dev.zed.Zed", so macOS never mistakes one app for the other.
+            ReleaseChannel::Stable => "com.rubiksworkspace.ide",
         }
     }
 

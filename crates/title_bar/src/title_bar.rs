@@ -23,7 +23,10 @@ use crate::application_menu::{
 
 use auto_update::AutoUpdateStatus;
 use call::ActiveCall;
-use client::{Client, UserStore, zed_urls};
+use client::{
+    Client, UserStore,
+    rubiks_account::{RubiksAccount, RubiksAccountStatus},
+};
 use command_palette_hooks::CommandPaletteFilter;
 
 use gpui::{
@@ -361,19 +364,11 @@ impl Render for TitleBar {
 
         let status = self.client.status();
         let status = &*status.borrow();
-        let user = self.user_store.read(cx).current_user();
-        let is_signing_in = user.is_none()
-            && matches!(
-                status,
-                client::Status::Authenticating
-                    | client::Status::Authenticated
-                    | client::Status::Connecting
-            );
-        let is_signed_out_or_auth_error = user.is_none()
-            && matches!(
-                status,
-                client::Status::SignedOut | client::Status::AuthenticationError
-            );
+        let account_status = RubiksAccount::global(cx)
+            .map(|account| account.read(cx).status().clone())
+            .unwrap_or(RubiksAccountStatus::SignedOut);
+        let is_signing_in = matches!(account_status, RubiksAccountStatus::Authenticating);
+        let is_signed_out = matches!(account_status, RubiksAccountStatus::SignedOut);
 
         children.push(
             h_flex()
@@ -384,9 +379,7 @@ impl Render for TitleBar {
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
                 .when(
-                    user.is_none()
-                        && is_signed_out_or_auth_error
-                        && TitleBarSettings::get_global(cx).show_sign_in,
+                    is_signed_out && TitleBarSettings::get_global(cx).show_sign_in,
                     |this| this.child(self.render_sign_in_button(cx)),
                 )
                 .when(is_signing_in, |this| {
@@ -493,6 +486,9 @@ impl TitleBar {
             }),
         );
         subscriptions.push(cx.observe(&user_store, |_a, _, cx| cx.notify()));
+        if let Some(account) = RubiksAccount::global(cx) {
+            subscriptions.push(cx.observe(&account, |_, _, cx| cx.notify()));
+        }
         if let Some(workspace_entity) = workspace.weak_handle().upgrade() {
             subscriptions.push(cx.subscribe(
                 &workspace_entity,
@@ -1167,13 +1163,13 @@ impl TitleBar {
             client::Status::UpgradeRequired => {
                 let auto_updater = auto_update::AutoUpdater::get(cx);
                 let label = match auto_updater.map(|auto_update| auto_update.read(cx).status()) {
-                    Some(AutoUpdateStatus::Updated { .. }) => "Please restart Zed to Collaborate",
+                    Some(AutoUpdateStatus::Updated { .. }) => "Please restart Rubiks IDE to Collaborate",
                     Some(AutoUpdateStatus::Installing { .. })
                     | Some(AutoUpdateStatus::Downloading { .. })
                     | Some(AutoUpdateStatus::Checking) => "Updating...",
                     Some(AutoUpdateStatus::Idle)
                     | Some(AutoUpdateStatus::Errored { .. })
-                    | None => "Please update Zed to Collaborate",
+                    | None => "Please update Rubiks IDE to Collaborate",
                 };
 
                 Some(
@@ -1196,20 +1192,19 @@ impl TitleBar {
     }
 
     pub fn render_sign_in_button(&mut self, _: &mut Context<Self>) -> Button {
-        let client = self.client.clone();
         let workspace = self.workspace.clone();
         Button::new("sign_in", "Sign In")
             .label_size(LabelSize::Small)
             .tab_index(0isize)
             .on_click(move |_, window, cx| {
-                let client = client.clone();
+                let Some(account) = RubiksAccount::global(cx) else {
+                    return;
+                };
+                let sign_in = account.update(cx, |account, cx| account.sign_in(cx));
                 let workspace = workspace.clone();
                 window
                     .spawn(cx, async move |mut cx| {
-                        client
-                            .sign_in_with_optional_connect(true, cx)
-                            .await
-                            .notify_workspace_async_err(workspace, &mut cx);
+                        sign_in.await.notify_workspace_async_err(workspace, &mut cx);
                     })
                     .detach();
             })
@@ -1220,12 +1215,18 @@ impl TitleBar {
 
         let user_store = self.user_store.clone();
         let workspace = self.workspace.clone();
-        let user = user_store.read(cx).current_user();
+        let zed_user = user_store.read(cx).current_user();
+        let rubiks_user = RubiksAccount::global(cx)
+            .and_then(|account| account.read(cx).user().cloned());
 
-        let user_avatar = user.as_ref().map(|u| u.avatar_uri.clone());
-        let username = user.as_ref().map(|u| u.username.clone());
+        let user_avatar = rubiks_user
+            .as_ref()
+            .and_then(|user| user.avatar_url.clone())
+            .map(SharedString::from);
+        let username = rubiks_user.as_ref().map(|user| user.username.clone());
 
-        let is_signed_in = user.is_some();
+        let is_signed_in = rubiks_user.is_some();
+        let has_zed_account = zed_user.is_some();
 
         let current_organization = user_store.read(cx).current_organization();
         let business_organization = current_organization
@@ -1305,8 +1306,12 @@ impl TitleBar {
                                     .into_any_element()
                             },
                             move |_, cx| {
-                                cx.open_url(&zed_urls::account_url(cx));
+                                cx.open_url(client::rubiks_account::RUBIKS_ACCOUNT_URL);
                             },
+                        )
+                        .action(
+                            "Clone Repository…",
+                            zed_actions::rubiks::CloneRepository.boxed_clone(),
                         )
                         .separator()
                     })
@@ -1317,7 +1322,7 @@ impl TitleBar {
                                     .w_full()
                                     .gap_1()
                                     .justify_between()
-                                    .child(Label::new("Restart to update Zed").color(Color::Accent))
+                                    .child(Label::new("Restart to update Rubiks IDE").color(Color::Accent))
                                     .child(
                                         Icon::new(IconName::Download)
                                             .size(IconSize::Small)
@@ -1331,7 +1336,7 @@ impl TitleBar {
                         )
                         .separator()
                     })
-                    .when(is_signed_in, |this| {
+                    .when(has_zed_account, |this| {
                         let mut this = this.header("Organization");
 
                         for (organization, plan) in &organizations {

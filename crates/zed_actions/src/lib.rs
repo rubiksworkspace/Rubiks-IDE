@@ -451,6 +451,18 @@ pub mod theme {
     actions!(theme, [ToggleMode]);
 }
 
+pub mod rubiks {
+    use gpui::actions;
+
+    actions!(
+        rubiks,
+        [
+            /// Clones one of the GitHub repositories your Rubiks account can access.
+            CloneRepository
+        ]
+    );
+}
+
 pub mod theme_selector {
     use gpui::Action;
     use schemars::JsonSchema;

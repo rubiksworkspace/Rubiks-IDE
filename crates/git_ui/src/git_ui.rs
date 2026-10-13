@@ -328,6 +328,9 @@ pub fn init(cx: &mut App) {
                 GitCloneModal::show(panel, window, cx)
             });
         });
+        workspace.register_action(|workspace, _: &zed_actions::rubiks::CloneRepository, window, cx| {
+            clone::clone_from_rubiks(workspace, window, cx);
+        });
         workspace.register_action(|workspace, _: &git::OpenModifiedFiles, window, cx| {
             open_modified_files(workspace, window, cx);
         });

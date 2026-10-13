@@ -1,5 +1,8 @@
 use crate::multibuffer_hint::MultibufferHint;
-use client::{Client, UserStore, zed_urls};
+use client::{
+    Client, UserStore,
+    rubiks_account::{self, RubiksAccount},
+};
 use cloud_api_types::Plan;
 use db::kvp::KeyValueStore;
 use fs::Fs;
@@ -279,21 +282,21 @@ impl Onboarding {
     }
 
     fn handle_sign_in(&mut self, _: &SignIn, window: &mut Window, cx: &mut Context<Self>) {
-        let client = Client::global(cx);
+        let Some(account) = RubiksAccount::global(cx) else {
+            return;
+        };
+        let sign_in = account.update(cx, |account, cx| account.sign_in(cx));
         let workspace = self.workspace.clone();
 
         window
             .spawn(cx, async move |mut cx| {
-                client
-                    .sign_in_with_optional_connect(true, &cx)
-                    .await
-                    .notify_workspace_async_err(workspace, &mut cx);
+                sign_in.await.notify_workspace_async_err(workspace, &mut cx);
             })
             .detach();
     }
 
     fn handle_open_account(_: &OpenAccount, _: &mut Window, cx: &mut App) {
-        cx.open_url(&zed_urls::account_url(cx))
+        cx.open_url(rubiks_account::RUBIKS_ACCOUNT_URL)
     }
 
     fn render_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -351,7 +354,7 @@ impl Render for Onboarding {
                                             .child(
                                                 v_flex()
                                                     .child(
-                                                        Headline::new("Welcome to Zed")
+                                                        Headline::new("Welcome to Rubiks IDE")
                                                             .size(HeadlineSize::Small),
                                                     )
                                                     .child(

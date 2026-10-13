@@ -3340,10 +3340,8 @@ fn native_available_skills(
 
 fn placeholder_text(agent_name: &str, has_commands: bool) -> String {
     if agent_name == agent::ZED_AGENT_ID.as_ref() {
-        format!(
-            "Message the {}, @ to include context, / for commands",
-            agent_name
-        )
+        // The native agent's ID stays "Zed Agent" (saved threads are keyed by it).
+        "Message the Rubiks Agent, @ to include context, / for commands".to_string()
     } else if has_commands {
         format!(
             "Message {} — @ to include context, / for commands",

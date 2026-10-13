@@ -1,7 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use client::{Client, TelemetrySettings, UserStore, zed_urls};
+use client::{
+    Client, TelemetrySettings, UserStore, rubiks_account::RubiksAccount, zed_urls,
+};
 use cloud_api_types::Plan;
 use collections::HashMap;
 use fs::Fs;
@@ -439,12 +441,12 @@ fn render_worktree_auto_trust_switch(tab_index: &mut isize, cx: &mut App) -> imp
         ui::ToggleState::Unselected
     };
 
-    let tooltip_description = "Zed can only allow services like language servers, project settings, and MCP servers to run after you mark a new project as trusted.";
+    let tooltip_description = "Rubiks IDE can only allow services like language servers, project settings, and MCP servers to run after you mark a new project as trusted.";
 
     SwitchField::new(
         "onboarding-auto-trust-worktrees",
         Some("Trust All Projects By Default"),
-        Some("Automatically mark all new projects as trusted to unlock all Zed's features".into()),
+        Some("Automatically mark all new projects as trusted to unlock all Rubiks IDE features".into()),
         toggle_state,
         {
             let fs = <dyn Fs>::global(cx);
@@ -650,7 +652,7 @@ fn render_zed_agent_button(user_store: &Entity<UserStore>, cx: &mut App) -> impl
                 .size(IconSize::XSmall)
                 .color(Color::Muted),
         )
-        .name("Zed Agent")
+        .name("Rubiks Agent")
         .state(state_element)
         .disabled(is_trial || is_pro)
         .map(|this| {
@@ -662,9 +664,11 @@ fn render_zed_agent_button(user_store: &Entity<UserStore>, cx: &mut App) -> impl
             } else {
                 this.on_click(move |_, _, cx| {
                     telemetry::event!("Welcome Zed Agent Sign In Clicked");
-                    let client = Client::global(cx);
-                    cx.spawn(async move |cx| client.sign_in_with_optional_connect(true, cx).await)
-                        .detach_and_log_err(cx);
+                    if let Some(account) = RubiksAccount::global(cx) {
+                        account
+                            .update(cx, |account, cx| account.sign_in(cx))
+                            .detach_and_log_err(cx);
+                    }
                 })
             }
         })

@@ -147,6 +147,9 @@ pub struct SettingsStore {
     default_settings: Rc<SettingsContent>,
     user_settings: Option<UserSettingsContent>,
     global_settings: Option<Box<SettingsContent>>,
+    /// Company-wide settings from the Rubiks gateway. Held only in memory: they
+    /// can carry API keys and are re-fetched at every launch.
+    organization_settings: Option<Box<SettingsContent>>,
 
     extension_settings: Option<Box<SettingsContent>>,
     server_settings: Option<Box<SettingsContent>>,
@@ -310,6 +313,7 @@ impl SettingsStore {
             setting_values: Default::default(),
             default_settings: default_settings.clone(),
             global_settings: None,
+            organization_settings: None,
             server_settings: None,
             user_settings: None,
             extension_settings: None,
@@ -1008,6 +1012,23 @@ impl SettingsStore {
         return parse_result;
     }
 
+    /// Sets the organization layer, which sits between the global settings file
+    /// and the user's settings. `None` removes it.
+    pub fn set_organization_settings(
+        &mut self,
+        organization_settings_content: Option<&str>,
+        cx: &mut App,
+    ) -> Result<()> {
+        self.organization_settings = match organization_settings_content {
+            Some(content) => {
+                Option::<SettingsContent>::parse_json_with_comments(content)?.map(Box::new)
+            }
+            None => None,
+        };
+        self.recompute_values(None, cx);
+        Ok(())
+    }
+
     pub fn set_server_settings(
         &mut self,
         server_settings_content: &str,
@@ -1375,6 +1396,7 @@ impl SettingsStore {
             let mut merged = self.default_settings.as_ref().clone();
             merged.merge_from_option(self.extension_settings.as_deref());
             merged.merge_from_option(self.global_settings.as_deref());
+            merged.merge_from_option(self.organization_settings.as_deref());
             if let Some(user_settings) = self.user_settings.as_ref() {
                 let active_profile = user_settings.for_profile(cx);
                 let should_merge_user_settings =
@@ -1420,6 +1442,12 @@ impl SettingsStore {
                     .project
                     .disable_ai
                     .merge_from(&global.project.disable_ai);
+            }
+            if let Some(organization) = &self.organization_settings {
+                merged
+                    .project
+                    .disable_ai
+                    .merge_from(&organization.project.disable_ai);
             }
             if let Some(user) = &self.user_settings {
                 merged
@@ -2811,6 +2839,49 @@ mod tests {
             &ItemSettings {
                 close_position: ClosePosition::Left,
                 git_status: true, // Staff from global settings
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn test_organization_settings(cx: &mut App) {
+        let mut store = SettingsStore::new(cx, &test_settings());
+        store.register_setting::<ItemSettings>();
+
+        store
+            .set_global_settings(r#"{ "tabs": { "close_position": "left" } }"#, cx)
+            .unwrap();
+        store
+            .set_organization_settings(
+                Some(r#"{ "tabs": { "close_position": "right", "git_status": true } }"#),
+                cx,
+            )
+            .unwrap();
+        assert_eq!(
+            store.get::<ItemSettings>(None),
+            &ItemSettings {
+                close_position: ClosePosition::Right,
+                git_status: true,
+            }
+        );
+
+        store
+            .set_user_settings(r#"{ "tabs": { "git_status": false } }"#, cx)
+            .unwrap();
+        assert_eq!(
+            store.get::<ItemSettings>(None),
+            &ItemSettings {
+                close_position: ClosePosition::Right,
+                git_status: false,
+            }
+        );
+
+        store.set_organization_settings(None, cx).unwrap();
+        assert_eq!(
+            store.get::<ItemSettings>(None),
+            &ItemSettings {
+                close_position: ClosePosition::Left,
+                git_status: false,
             }
         );
     }

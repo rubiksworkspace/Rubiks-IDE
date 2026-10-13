@@ -5910,7 +5910,7 @@ impl AgentPanel {
                 Some(ContextMenu::build(window, cx, |menu, _window, cx| {
                     menu.context(focus_handle.clone())
                         .item(
-                            ContextMenuEntry::new("Zed Agent")
+                            ContextMenuEntry::new("Rubiks Agent")
                                 .when(
                                     !showing_terminal && is_agent_selected(Agent::NativeAgent),
                                     |this| this.action(Box::new(NewThread)),
@@ -6277,50 +6277,10 @@ impl AgentPanel {
         cx.notify();
     }
 
-    fn should_render_new_user_onboarding(&mut self, cx: &mut Context<Self>) -> bool {
-        if self
-            .new_user_onboarding_upsell_dismissed
-            .load(Ordering::Acquire)
-        {
-            return false;
-        }
-
-        let user_store = self.user_store.read(cx);
-
-        if user_store.plan().is_some_and(|plan| plan == Plan::ZedPro)
-            && user_store
-                .subscription_period()
-                .and_then(|period| period.0.checked_add_days(chrono::Days::new(1)))
-                .is_some_and(|date| date < chrono::Utc::now())
-        {
-            if !self
-                .new_user_onboarding_upsell_dismissed
-                .load(Ordering::Acquire)
-            {
-                self.dismiss_ai_onboarding(cx);
-            }
-            return false;
-        }
-
-        let has_configured_non_zed_providers = LanguageModelRegistry::read_global(cx)
-            .visible_providers()
-            .iter()
-            .any(|provider| {
-                provider.is_authenticated(cx)
-                    && provider.id() != language_model::ZED_CLOUD_PROVIDER_ID
-            });
-
-        match &self.base_view {
-            BaseView::Uninitialized | BaseView::Terminal { .. } => false,
-            BaseView::AgentThread { conversation_view } => {
-                if conversation_view.read(cx).as_native_thread(cx).is_some() {
-                    let history_is_empty = ThreadStore::global(cx).read(cx).is_empty();
-                    history_is_empty || !has_configured_non_zed_providers
-                } else {
-                    false
-                }
-            }
-        }
+    fn should_render_new_user_onboarding(&self) -> bool {
+        // This card onboards to Zed's hosted AI plans (zed.dev sign-in, trials),
+        // which Rubiks IDE doesn't use; providers are configured via the model picker.
+        false
     }
 
     fn render_new_user_onboarding(
@@ -6328,7 +6288,7 @@ impl AgentPanel {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
-        if !self.should_render_new_user_onboarding(cx) {
+        if !self.should_render_new_user_onboarding() {
             return None;
         }
 

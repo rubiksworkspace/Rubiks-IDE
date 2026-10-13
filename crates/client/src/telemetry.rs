@@ -737,7 +737,7 @@ mod tests {
     use super::*;
     use clock::FakeSystemClock;
 
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, UpdateGlobal as _};
     use http_client::FakeHttpClient;
     use std::collections::HashMap;
     use telemetry_events::FlexibleEvent;
@@ -1063,6 +1063,14 @@ mod tests {
         cx.update(|cx| {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
+            // Telemetry defaults to off in Rubiks IDE; these tests cover its behavior once enabled.
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    let telemetry = settings.telemetry.get_or_insert_default();
+                    telemetry.metrics = Some(true);
+                    telemetry.diagnostics = Some(true);
+                });
+            });
         });
     }
 

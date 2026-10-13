@@ -3313,7 +3313,7 @@ impl GitStore {
             GitStoreState::Local { fs, .. } => {
                 let fs = fs.clone();
                 cx.background_executor()
-                    .spawn(async move { fs.git_clone(&path, &repo).await })
+                    .spawn(async move { fs.git_clone(&path, &repo, None).await })
             }
             GitStoreState::Remote {
                 upstream_client,

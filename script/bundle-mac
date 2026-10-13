@@ -49,9 +49,15 @@ shift $((OPTIND-1))
 
 # Get release channel
 pushd crates/zed
-channel=$(<RELEASE_CHANNEL)
+# ZED_RELEASE_CHANNEL=stable builds the shareable Rubiks IDE without changing
+# RELEASE_CHANNEL, which local development builds read.
+channel="${ZED_RELEASE_CHANNEL:-$(<RELEASE_CHANNEL)}"
 export ZED_RELEASE_CHANNEL="${channel}"
 popd
+
+# Rubiks IDE has no update server yet, and Zed's would replace it with Zed.
+# Setting this turns update checks off and shows the message instead.
+export ZED_UPDATE_EXPLANATION="${ZED_UPDATE_EXPLANATION:-Rubiks IDE updates are shared by your team. Install the latest Rubiks IDE DMG to update.}"
 
 export ZED_BUNDLE=true
 export CARGO_BUNDLE_SKIP_BUILD=true
@@ -195,8 +201,12 @@ function sign_app_binaries() {
     echo "Downloading git binary"
     download_git "${target_triple}" "${app_path}/Contents/MacOS/git"
 
-    # Note: The app identifier for our development builds is the same as the app identifier for nightly.
-    cp crates/zed/contents/$channel/embedded.provisionprofile "${app_path}/Contents/"
+    # Zed's provisioning profiles belong to Zed's Apple team; they only apply to a
+    # build signed with that team's certificate.
+    if [[ $can_code_sign = true ]]; then
+        # Note: The app identifier for our development builds is the same as the app identifier for nightly.
+        cp crates/zed/contents/$channel/embedded.provisionprofile "${app_path}/Contents/"
+    fi
 
     if [[ $can_code_sign = true ]]; then
         echo "Code signing binaries"
@@ -245,7 +255,7 @@ function sign_app_binaries() {
     else
         dmg_target_directory="target/${target_triple}/${target_dir}"
         dmg_source_directory="${dmg_target_directory}/dmg"
-        dmg_file_path="${dmg_target_directory}/Zed-${arch_suffix}.dmg"
+        dmg_file_path="${dmg_target_directory}/Rubiks-IDE-${arch_suffix}.dmg"
         xcode_bin_dir_path="$(xcode-select -p)/usr/bin"
 
         rm -rf ${dmg_source_directory}
@@ -257,16 +267,13 @@ function sign_app_binaries() {
         ln -s /Applications ${dmg_source_directory}
 
         echo "Creating final DMG at ${dmg_file_path} using ${dmg_source_directory}"
-        hdiutil create -volname Zed -srcfolder "${dmg_source_directory}" -ov -format UDZO "${dmg_file_path}"
+        hdiutil create -volname "Rubiks IDE" -srcfolder "${dmg_source_directory}" -ov -format UDZO "${dmg_file_path}"
 
         # If someone runs this bundle script locally, a symlink will be placed in `dmg_source_directory`.
         # This symlink causes CPU issues with Zed if the Zed codebase is the project being worked on, so we simply remove it for now.
         echo "Removing symlink to /Applications from ${dmg_source_directory}"
         rm ${dmg_source_directory}/Applications
 
-        echo "Adding license agreement to DMG"
-        npm install --global dmg-license minimist
-        dmg-license script/terms/terms.json "${dmg_file_path}"
 
         if [[ $can_code_sign = true ]]; then
             echo "Notarizing DMG with Apple"
