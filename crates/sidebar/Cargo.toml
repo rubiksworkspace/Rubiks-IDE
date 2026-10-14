@@ -54,6 +54,7 @@ git_ui_core.workspace = true
 zed_actions.workspace = true
 
 [dev-dependencies]
+agent_research = { workspace = true, features = ["test-support"] }
 acp_thread = { workspace = true, features = ["test-support"] }
 agent = { workspace = true, features = ["test-support"] }
 agent_ui = { workspace = true, features = ["test-support"] }

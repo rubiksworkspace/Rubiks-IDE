@@ -62,6 +62,9 @@ pub struct ActionLog {
     last_reject_undo: Option<LastRejectUndo>,
     /// Tracks the last time files were read by the agent, to detect external modifications
     file_read_times: HashMap<PathBuf, MTime>,
+    /// The ACP session the latest review decision came from, for the Rubiks
+    /// research records of decisions made without telemetry.
+    research_session: Option<Arc<str>>,
 }
 
 impl ActionLog {
@@ -73,6 +76,7 @@ impl ActionLog {
             linked_action_log: None,
             last_reject_undo: None,
             file_read_times: HashMap::default(),
+            research_session: None,
         }
     }
 
@@ -198,6 +202,8 @@ impl ActionLog {
                     diff,
                     diff_update: diff_update_tx,
                     _open_lsp_handle: open_lsp_handle,
+                    agent_edited_at: None,
+                    user_edited_since_agent: false,
                     _maintain_diff: cx.spawn({
                         let buffer = buffer.clone();
                         async move |this, cx| {
@@ -241,6 +247,9 @@ impl ActionLog {
         let Some(tracked_buffer) = self.tracked_buffers.get_mut(&buffer) else {
             return;
         };
+        if !tracked_buffer.unreviewed_edits.is_empty() {
+            tracked_buffer.user_edited_since_agent = true;
+        }
         tracked_buffer.schedule_diff_update(ChangeAuthor::User, cx);
     }
 
@@ -603,6 +612,7 @@ impl ActionLog {
         }
 
         tracked_buffer.version = new_version;
+        tracked_buffer.agent_edited_at = Some(std::time::Instant::now());
         tracked_buffer.schedule_diff_update(ChangeAuthor::Agent, cx);
     }
 
@@ -645,9 +655,13 @@ impl ActionLog {
         telemetry: Option<ActionLogTelemetry>,
         cx: &mut Context<Self>,
     ) {
+        let research_session = self.research_session(telemetry.as_ref());
+        let path = buffer_abs_path(&buffer, cx);
         let Some(tracked_buffer) = self.tracked_buffers.get_mut(&buffer) else {
             return;
         };
+        let review = ReviewTiming::of(tracked_buffer);
+        let mut accepted_text = Vec::new();
 
         let mut metrics = ActionLogMetrics::for_buffer(buffer.read(cx));
         match tracked_buffer.status {
@@ -684,26 +698,34 @@ impl ActionLog {
                                 Point::new(edit.new.end, 0),
                                 tracked_buffer.snapshot.max_point(),
                             ));
-                        tracked_buffer.diff_base.replace(
-                            old_range,
-                            &tracked_buffer
-                                .snapshot
-                                .text_for_range(new_range)
-                                .collect::<String>(),
-                        );
+                        let new_text = tracked_buffer
+                            .snapshot
+                            .text_for_range(new_range)
+                            .collect::<String>();
+                        tracked_buffer.diff_base.replace(old_range, &new_text);
+                        accepted_text.push(new_text);
                         delta += edit.new_len() as i32 - edit.old_len() as i32;
                         metrics.add_edit(edit);
                         false
                     }
                 });
-                if tracked_buffer.unreviewed_edits.is_empty()
-                    && let TrackedBufferStatus::Created { .. } = &mut tracked_buffer.status
-                {
-                    tracked_buffer.status = TrackedBufferStatus::Modified;
+                if tracked_buffer.unreviewed_edits.is_empty() {
+                    tracked_buffer.user_edited_since_agent = false;
+                    if let TrackedBufferStatus::Created { .. } = &mut tracked_buffer.status {
+                        tracked_buffer.status = TrackedBufferStatus::Modified;
+                    }
                 }
                 tracked_buffer.schedule_diff_update(ChangeAuthor::User, cx);
             }
         }
+        research_review(
+            research_session.as_deref(),
+            "accept",
+            path.as_deref(),
+            &metrics,
+            review,
+            &accepted_text,
+        );
         if let Some(telemetry) = telemetry {
             telemetry_report_accepted_edits(&telemetry, metrics);
         }
@@ -716,9 +738,12 @@ impl ActionLog {
         telemetry: Option<ActionLogTelemetry>,
         cx: &mut Context<Self>,
     ) -> (Task<Result<()>>, Option<PerBufferUndo>) {
+        let research_session = self.research_session(telemetry.as_ref());
+        let path = buffer_abs_path(&buffer, cx);
         let Some(tracked_buffer) = self.tracked_buffers.get_mut(&buffer) else {
             return (Task::ready(Ok(())), None);
         };
+        let review = ReviewTiming::of(tracked_buffer);
 
         let mut metrics = ActionLogMetrics::for_buffer(buffer.read(cx));
         let mut undo_info: Option<PerBufferUndo> = None;
@@ -887,6 +912,14 @@ impl ActionLog {
                     .update(cx, |project, cx| project.save_buffer(buffer, cx))
             }
         };
+        research_review(
+            research_session.as_deref(),
+            "reject",
+            path.as_deref(),
+            &metrics,
+            review,
+            &[],
+        );
         if let Some(telemetry) = telemetry {
             telemetry_report_rejected_edits(&telemetry, metrics);
         }
@@ -898,9 +931,42 @@ impl ActionLog {
         telemetry: Option<ActionLogTelemetry>,
         cx: &mut Context<Self>,
     ) {
+        let research_session = self.research_session(telemetry.as_ref());
+        // Without telemetry the caller is the next message keeping what was
+        // left unreviewed, not the user's own click.
+        let decision = if telemetry.is_some() {
+            "accept_all"
+        } else {
+            "implicit_accept"
+        };
         self.tracked_buffers.retain(|buffer, tracked_buffer| {
             let mut metrics = ActionLogMetrics::for_buffer(buffer.read(cx));
             metrics.add_edits(tracked_buffer.unreviewed_edits.edits());
+            if !tracked_buffer.unreviewed_edits.is_empty() {
+                let snapshot = &tracked_buffer.snapshot;
+                let accepted_text: Vec<String> = tracked_buffer
+                    .unreviewed_edits
+                    .edits()
+                    .iter()
+                    .map(|edit| {
+                        let range = snapshot.point_to_offset(Point::new(edit.new.start, 0))
+                            ..snapshot.point_to_offset(cmp::min(
+                                Point::new(edit.new.end, 0),
+                                snapshot.max_point(),
+                            ));
+                        snapshot.text_for_range(range).collect()
+                    })
+                    .collect();
+                research_review(
+                    research_session.as_deref(),
+                    decision,
+                    buffer_abs_path(buffer, cx).as_deref(),
+                    &metrics,
+                    ReviewTiming::of(tracked_buffer),
+                    &accepted_text,
+                );
+                tracked_buffer.user_edited_since_agent = false;
+            }
             if let Some(telemetry) = telemetry.as_ref() {
                 telemetry_report_accepted_edits(telemetry, metrics);
             }
@@ -1138,6 +1204,86 @@ fn telemetry_report_rejected_edits(telemetry: &ActionLogTelemetry, metrics: Acti
     );
 }
 
+impl ActionLog {
+    /// The session review decisions belong to: the caller's, else the last
+    /// one seen.
+    fn research_session(&mut self, telemetry: Option<&ActionLogTelemetry>) -> Option<Arc<str>> {
+        if let Some(telemetry) = telemetry {
+            self.research_session = Some(telemetry.session_id.clone());
+        }
+        self.research_session.clone()
+    }
+}
+
+/// How a review decision came about.
+#[derive(Clone, Copy)]
+struct ReviewTiming {
+    /// From the agent's last edit to the decision.
+    decide_ms: Option<u128>,
+    user_edited: bool,
+}
+
+impl ReviewTiming {
+    fn of(tracked_buffer: &TrackedBuffer) -> Self {
+        Self {
+            decide_ms: tracked_buffer
+                .agent_edited_at
+                .map(|edited| edited.elapsed().as_millis()),
+            user_edited: tracked_buffer.user_edited_since_agent,
+        }
+    }
+}
+
+fn buffer_abs_path(buffer: &Entity<Buffer>, cx: &App) -> Option<PathBuf> {
+    let buffer = buffer.read(cx);
+    Some(buffer.file()?.as_local()?.abs_path(cx))
+}
+
+/// The Rubiks research records of one review decision: `diff.review`, and
+/// for accepted agent lines their origin now and the survival checks to
+/// come.
+fn research_review(
+    session: Option<&str>,
+    decision: &str,
+    path: Option<&Path>,
+    metrics: &ActionLogMetrics,
+    review: ReviewTiming,
+    accepted_text: &[String],
+) {
+    let session = session.unwrap_or("unknown");
+    agent_research::record(
+        session,
+        "diff.review",
+        serde_json::json!({
+            "decision": decision,
+            "path": path,
+            "language": metrics.language.as_deref(),
+            "linesAdded": metrics.lines_added,
+            "linesRemoved": metrics.lines_removed,
+            "decideMs": review.decide_ms,
+            "userEditedBeforeDecision": review.user_edited,
+        }),
+    );
+    let Some(path) = path else {
+        return;
+    };
+    let accepted: String = accepted_text.concat();
+    if accepted.trim().is_empty() {
+        return;
+    }
+    agent_research::record(
+        session,
+        "code.origin",
+        serde_json::json!({
+            "path": path,
+            "checkpoint": "accepted",
+            "origin": if review.user_edited { "mixed" } else { "agent" },
+            "agentLines": accepted.lines().filter(|line| !line.trim().is_empty()).count(),
+        }),
+    );
+    agent_research::track_accepted_lines(session, path, &accepted);
+}
+
 fn apply_non_conflicting_edits(
     patch: &Patch<u32>,
     edits: Vec<Edit<u32>>,
@@ -1278,6 +1424,10 @@ pub struct TrackedBuffer {
     _open_lsp_handle: OpenLspBufferHandle,
     _maintain_diff: Task<()>,
     _subscription: Subscription,
+    /// When the agent last edited the buffer (the start of its review time).
+    agent_edited_at: Option<std::time::Instant>,
+    /// The user changed the buffer while agent edits were waiting for review.
+    user_edited_since_agent: bool,
 }
 
 impl TrackedBuffer {

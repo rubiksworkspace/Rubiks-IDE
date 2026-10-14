@@ -23,7 +23,9 @@ mod message_editor;
 mod mode_selector;
 mod model_selector;
 mod model_selector_popover;
+mod prime_agent_data_view;
 mod profile_selector;
+mod session_survey;
 mod terminal_codegen;
 mod terminal_inline_assistant;
 pub mod terminal_thread_metadata_store;
@@ -249,6 +251,10 @@ actions!(
         OpenActiveThreadAsMarkdown,
         /// Opens the agent diff view to review changes.
         OpenAgentDiff,
+        /// Opens a tab for browsing Prime Agent's saved sessions, chat, tool calls and usage.
+        OpenPrimeAgentData,
+        /// Rates the current agent session (NASA-TLX workload and sense of agency) for Rubiks research.
+        RateSession,
         /// Copies the current thread to the clipboard as JSON for debugging.
         CopyThreadToClipboard,
         /// Loads a thread from the clipboard JSON for debugging.
@@ -653,6 +659,25 @@ pub fn init(
     })
     .detach();
     cx.observe_new(ManageProfilesModal::register).detach();
+    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
+        workspace.register_action(
+            |workspace: &mut Workspace,
+             _: &OpenPrimeAgentData,
+             window: &mut Window,
+             cx: &mut Context<Workspace>| {
+                prime_agent_data_view::open(workspace, window, cx);
+            },
+        );
+        workspace.register_action(
+            |workspace: &mut Workspace,
+             _: &RateSession,
+             window: &mut Window,
+             cx: &mut Context<Workspace>| {
+                session_survey::open(workspace, window, cx);
+            },
+        );
+    })
+    .detach();
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(
             |workspace: &mut Workspace,

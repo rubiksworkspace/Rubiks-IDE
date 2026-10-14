@@ -1,0 +1,26 @@
+[package]
+name = "agent_research"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/agent_research.rs"
+doctest = false
+
+[features]
+# Test builds of crates that drive agent edits write no research records.
+test-support = []
+
+[dependencies]
+chrono.workspace = true
+log.workspace = true
+serde_json.workspace = true
+util.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

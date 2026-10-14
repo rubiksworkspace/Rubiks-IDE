@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use gpui::Transformation;
-use gpui::{App, IntoElement, Rems, RenderOnce, Size, Styled, Window, svg};
+use gpui::{App, IntoElement, ObjectFit, Rems, RenderOnce, Size, Styled, StyledImage, Window, img, svg};
+use theme::Appearance;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, EnumString, IntoStaticStr};
 
@@ -29,6 +30,17 @@ impl VectorName {
         let file_stem: &'static str = self.into();
         format!("images/{file_stem}.svg").into()
     }
+}
+
+/// The Rubiks cube mark in full color, in the variant drawn for the active
+/// theme's background. It is a raster brand asset, so unlike a [`Vector`] it
+/// is never tinted.
+pub fn rubiks_logo(size: Rems, cx: &App) -> impl IntoElement {
+    let path = match cx.theme().appearance() {
+        Appearance::Light => "images/rubiks_logo_light.png",
+        Appearance::Dark => "images/rubiks_logo_dark.png",
+    };
+    img(path).size(size).flex_none().object_fit(ObjectFit::Contain)
 }
 
 /// A vector image, such as an SVG.
