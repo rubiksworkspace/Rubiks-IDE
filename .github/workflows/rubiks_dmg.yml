@@ -1,0 +1,94 @@
+# Builds the Rubiks IDE DMG for Apple silicon on every push to main (or by
+# hand from the Actions tab). Each run keeps the DMG as a workflow artifact
+# for 30 days, and pushes to main also replace the "ide-latest" release, so
+# the newest build is always at:
+#   https://github.com/<owner>/<repo>/releases/download/ide-latest/Rubiks-IDE-aarch64.dmg
+#
+# The DMG is not notarized (there is no Apple Developer certificate), so
+# macOS blocks the first launch: right-click Rubiks IDE → Open, or run
+#   xattr -dr com.apple.quarantine "/Applications/Rubiks IDE.app"
+name: Rubiks IDE DMG
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push makes an older build pointless: cancel it.
+concurrency:
+  group: rubiks-ide-dmg-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # replaces the ide-latest release
+
+jobs:
+  dmg:
+    name: Build DMG (Apple silicon)
+    runs-on: macos-15
+    timeout-minutes: 330
+    env:
+      # The shareable build; local development keeps crates/zed/RELEASE_CHANNEL.
+      ZED_RELEASE_CHANNEL: stable
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+      # The release profile builds most crates as one codegen unit with debug
+      # info, which is slow and memory-hungry on the hosted runner (3 cores,
+      # 7 GB). This build is for sharing, not for crash symbolication.
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          df -h /
+          # SDKs this build never uses; any that are missing are skipped.
+          sudo rm -rf "${ANDROID_HOME:-/nonexistent}" "$HOME/.dotnet" /usr/local/share/dotnet || true
+          df -h /
+
+      - name: Install the Rust toolchain
+        # rust-toolchain.toml pins the version, components and targets.
+        run: |
+          rustup toolchain install
+          rustup target add aarch64-apple-darwin
+          rustc --version
+
+      - name: Cache cargo registry and tools
+        uses: Swatinem/rust-cache@v2
+        with:
+          # The release target directory is far over the cache size limit.
+          cache-targets: "false"
+
+      - name: Build the DMG
+        run: script/bundle-mac aarch64-apple-darwin
+
+      - name: Locate the DMG
+        id: dmg
+        run: |
+          dmg="target/aarch64-apple-darwin/release/Rubiks-IDE-aarch64.dmg"
+          test -f "$dmg"
+          ls -lh "$dmg"
+          echo "path=$dmg" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the DMG as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rubiks-IDE-aarch64-${{ github.sha }}
+          path: ${{ steps.dmg.outputs.path }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish the ide-latest release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DMG: ${{ steps.dmg.outputs.path }}
+        run: |
+          gh release delete ide-latest --yes --cleanup-tag || true
+          gh release create ide-latest "$DMG" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "Rubiks IDE (latest main build)" \
+            --notes "Built from ${GITHUB_SHA} by run ${GITHUB_RUN_NUMBER}. Apple silicon only; not notarized: right-click Rubiks IDE → Open on first launch."
