@@ -1,8 +1,9 @@
 name: Slack Notify First Responders
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  issues:
-    types: [labeled]
+  workflow_dispatch:
 
 permissions:
   contents: read

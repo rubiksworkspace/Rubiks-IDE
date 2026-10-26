@@ -3,10 +3,10 @@
 name: deploy_collab
 env:
   DOCKER_BUILDKIT: '1'
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  push:
-    tags:
-    - collab-production
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

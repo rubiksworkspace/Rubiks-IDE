@@ -1,7 +1,7 @@
 name: "Close Stale Issues"
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  schedule:
-    - cron: "0 2 * * 5"
   workflow_dispatch:
     inputs:
       debug-only:

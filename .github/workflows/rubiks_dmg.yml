@@ -9,9 +9,9 @@
 #   xattr -dr com.apple.quarantine "/Applications/Rubiks IDE.app"
 name: Rubiks IDE DMG
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 # A newer push makes an older build pointless: cancel it.

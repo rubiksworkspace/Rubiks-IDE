@@ -1,10 +1,8 @@
 name: Track duplicate bot effectiveness
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  issues:
-    types: [closed]
-  schedule:
-    - cron: "0 8 */2 * *" # every 2 days at 8 AM UTC
   workflow_dispatch:
 
 permissions:

@@ -3,9 +3,9 @@
 name: compliance_check
 env:
   CARGO_TERM_COLOR: always
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  schedule:
-  - cron: 30 17 * * 2
   workflow_dispatch: {}
 permissions:
   contents: read

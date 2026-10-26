@@ -1,8 +1,8 @@
 name: Comment on potential duplicate bug/crash reports
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  issues:
-    types: [opened]
   workflow_dispatch:
     inputs:
       issue_number:

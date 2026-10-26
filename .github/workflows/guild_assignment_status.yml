@@ -5,11 +5,10 @@
 
 name: Guild Assignment Status
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  issues:
-    types: [assigned, unassigned]
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
   contents: read

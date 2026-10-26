@@ -8,18 +8,9 @@ name: Documentation Suggestions
 # 4. Fail loudly on script errors or when no callout changes are produced.
 # 5. Keep this workflow focused on suggestions only until that stable workflow is added.
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  # Analyze merged PRs on main and cherry-picks to release branches. Each job
-  # further restricts the event actions and target branch that it handles.
-  pull_request:
-    types: [closed, opened, synchronize]
-    branches:
-      - main
-      - "v0.*"
-    paths:
-      - "crates/**/*.rs"
-
-  # Manual trigger for testing
   workflow_dispatch:
     inputs:
       pr_number:

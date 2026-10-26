@@ -1,9 +1,9 @@
 name: "Surface closed issues someone's commented on"
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  issue_comment:
-    types:
-      - created
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -1,15 +1,10 @@
 # Generated from xtask::workflows::extension_auto_bump
 # Rebuild with `cargo xtask workflows`.
 name: extension_auto_bump
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  push:
-    branches:
-    - main
-    paths:
-    - extensions/**
-    - '!extensions/test-extension/**'
-    - '!extensions/workflows/**'
-    - '!extensions/*.md'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

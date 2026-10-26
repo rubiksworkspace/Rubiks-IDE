@@ -14,9 +14,9 @@
 
 name: Hotfix Review Monitor
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  schedule:
-    - cron: "30 13 * * 1-5" # 1:30 PM UTC weekdays
   workflow_dispatch: {}
 
 permissions:

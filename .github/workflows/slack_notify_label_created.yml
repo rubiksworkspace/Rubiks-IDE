@@ -1,8 +1,9 @@
 name: New label created, notify slack
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  label:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
   contents: read

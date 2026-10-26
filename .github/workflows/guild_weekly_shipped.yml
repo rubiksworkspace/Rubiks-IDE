@@ -4,9 +4,9 @@
 
 name: Guild Weekly Shipped
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  schedule:
-    - cron: "0 7 * * 3"
   workflow_dispatch:
 
 permissions:

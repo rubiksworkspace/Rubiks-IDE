@@ -1,9 +1,9 @@
 name: Bump collab-staging Tag
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  schedule:
-    # Fire every day at 16:00 UTC (At the start of the US workday)
-    - cron: "0 16 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read

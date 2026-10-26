@@ -1,10 +1,10 @@
 # Generated from xtask::workflows::deploy_nightly_docs
 # Rebuild with `cargo xtask workflows`.
 name: deploy_nightly_docs
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  push:
-    branches:
-    - main
+  workflow_dispatch:
 permissions: {}
 jobs:
   deploy_docs:

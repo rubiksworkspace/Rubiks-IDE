@@ -2,9 +2,9 @@
 
 name: Issue Triage Queue Board
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  schedule:
-    - cron: "5 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:

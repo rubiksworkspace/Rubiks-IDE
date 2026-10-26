@@ -1,10 +1,9 @@
 name: "Label new and reopened blank issues for triage"
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  issues:
-    types:
-      - opened
-      - reopened
+  workflow_dispatch:
 
 permissions:
   contents: read

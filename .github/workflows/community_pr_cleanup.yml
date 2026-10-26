@@ -3,9 +3,9 @@
 
 name: Community PR Cleanup
 
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  schedule:
-    - cron: "30 8 * * *"
   workflow_dispatch:
     inputs:
       dry-run:

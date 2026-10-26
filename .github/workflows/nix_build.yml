@@ -4,11 +4,10 @@ name: nix_build
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: '1'
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  pull_request:
-    types:
-    - labeled
-    - synchronize
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

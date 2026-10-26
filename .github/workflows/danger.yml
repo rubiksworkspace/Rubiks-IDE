@@ -1,16 +1,10 @@
 # Generated from xtask::workflows::danger
 # Rebuild with `cargo xtask workflows`.
 name: danger
+# Started by hand only (Actions tab → Run workflow): no push, tag, pull
+# request, issue or schedule runs.
 on:
-  merge_group: {}
-  pull_request:
-    types:
-    - opened
-    - synchronize
-    - reopened
-    - edited
-    branches:
-    - main
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
