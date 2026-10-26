@@ -35,9 +35,20 @@ pub const DEFAULT_RUBIKS_SERVER_URL: &str = "https://api.rubiksworkspace.com";
 /// Where "your account" links go: the Rubiks Workspace site, not the API host.
 pub const RUBIKS_ACCOUNT_URL: &str = "https://rubiksworkspace.com";
 
-/// Prime Agent's official installer. Fixed here rather than taken from the
-/// gateway, so the company setup cannot make the IDE run other commands.
+/// The installer of Prime Agent (Rubiks), the harness build this IDE is made
+/// for: its `prime-agent data` command backs the Prime Agent Data tab, and it
+/// keeps telemetry off. Published for Apple silicon. Fixed here rather than
+/// taken from the gateway, so the company setup cannot make the IDE run other
+/// commands.
+const RUBIKS_PRIME_AGENT_INSTALLER_URL: &str =
+    "https://github.com/rubiksworkspace/rubiks-harness/releases/download/harness-latest/install.sh";
+
+/// Prime Agent's official installer, for the platforms the Rubiks build is
+/// not published for.
 const PRIME_AGENT_INSTALLER_URL: &str = "https://app.primeintellect.ai/prime-agent/install.sh";
+
+/// Whether this platform has a Rubiks build of Prime Agent.
+const RUBIKS_BUILD_PLATFORM: bool = cfg!(all(target_os = "macos", target_arch = "aarch64"));
 
 /// How long to wait for the browser to come back after GitHub sign-in.
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
@@ -220,9 +231,7 @@ impl RubiksAccount {
             log::info!("applied Rubiks company setup v{}", setup.version);
 
             if setup.features.prime_agent {
-                cx.background_spawn(install_prime_agent_if_missing())
-                    .await
-                    .log_err();
+                cx.background_spawn(ensure_prime_agent()).await.log_err();
             }
         }));
     }
@@ -270,9 +279,7 @@ impl RubiksAccount {
             return Task::ready(Err(anyhow!("sign in to Rubiks to see your repositories")));
         };
         let http = self.http.clone();
-        cx.background_spawn(async move {
-            Ok(get_json(&http, &token, "/api/ide/repos").await?)
-        })
+        cx.background_spawn(async move { Ok(get_json(&http, &token, "/api/ide/repos").await?) })
     }
 
     /// Restore a session saved in the keychain on a previous launch.
@@ -369,20 +376,72 @@ fn github_prompt_field(prompt: &str) -> Option<GitPromptField> {
     }
 }
 
-async fn install_prime_agent_if_missing() -> Result<()> {
+/// Where Prime Agent's installer puts its launcher.
+fn prime_agent_binary() -> std::path::PathBuf {
+    util::paths::home_dir().join(".local/bin/prime-agent")
+}
+
+/// Install Prime Agent when it is missing. Where a Rubiks build exists, also
+/// replace an installed upstream build: it lacks `prime-agent data`, so the
+/// Prime Agent Data tab cannot read it.
+async fn ensure_prime_agent() -> Result<()> {
     if cfg!(windows) {
         return Ok(());
     }
-    let binary = util::paths::home_dir().join(".local/bin/prime-agent");
-    if smol::fs::metadata(&binary).await.is_ok() {
+    let binary = prime_agent_binary();
+    let installed = smol::fs::metadata(&binary).await.is_ok();
+    if !RUBIKS_BUILD_PLATFORM {
+        if installed {
+            return Ok(());
+        }
+        return run_prime_agent_installer(PRIME_AGENT_INSTALLER_URL).await;
+    }
+    if installed && is_rubiks_prime_agent(&binary).await {
         return Ok(());
     }
-    log::info!("Prime Agent is not installed, installing it to {}", binary.display());
+    if installed {
+        log::info!(
+            "{} is not the Rubiks build of Prime Agent, replacing it",
+            binary.display()
+        );
+    }
+    install_rubiks_prime_agent().await
+}
+
+/// Install (or reinstall) Prime Agent (Rubiks) from its latest release.
+pub async fn install_rubiks_prime_agent() -> Result<()> {
+    anyhow::ensure!(
+        RUBIKS_BUILD_PLATFORM,
+        "Prime Agent (Rubiks) is published for Apple silicon Macs only"
+    );
+    run_prime_agent_installer(RUBIKS_PRIME_AGENT_INSTALLER_URL).await
+}
+
+/// Whether `binary` is the Rubiks build: its help lists the `data` command.
+/// Asking for help never starts a session, unlike running `data` on a build
+/// that does not know it.
+pub async fn is_rubiks_prime_agent(binary: &std::path::Path) -> bool {
+    let Ok(output) = new_command(binary)
+        .arg("--help")
+        .stdin(Stdio::null())
+        .output()
+        .await
+    else {
+        return false;
+    };
+    output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.trim_start().starts_with("data "))
+}
+
+async fn run_prime_agent_installer(installer_url: &str) -> Result<()> {
+    log::info!(
+        "installing Prime Agent to {} from {installer_url}",
+        prime_agent_binary().display()
+    );
     let output = new_command("sh")
-        .args([
-            "-c",
-            &format!("curl -fsSL {PRIME_AGENT_INSTALLER_URL} | sh"),
-        ])
+        .args(["-c", &format!("curl -fsSL {installer_url} | sh")])
         .env("PRIME_AGENT_INSTALLER_NONINTERACTIVE", "1")
         .stdin(Stdio::null())
         .output()
@@ -425,10 +484,12 @@ async fn authenticate(
 ) -> Result<(RubiksUser, String)> {
     let server_url = rubiks_server_url();
     let token = sign_in_with_browser(&server_url, cx).await?;
-    let user = fetch_user(http, &token).await.map_err(|error| match error {
-        GatewayError::Unauthorized => anyhow!("the Rubiks gateway rejected the new session"),
-        GatewayError::Other(error) => error,
-    })?;
+    let user = fetch_user(http, &token)
+        .await
+        .map_err(|error| match error {
+            GatewayError::Unauthorized => anyhow!("the Rubiks gateway rejected the new session"),
+            GatewayError::Other(error) => error,
+        })?;
     credentials_provider
         .write_credentials(&server_url, &user.id, token.as_bytes(), cx)
         .await
@@ -477,8 +538,11 @@ async fn sign_in_with_browser(server_url: &str, cx: &mut AsyncApp) -> Result<Str
                 request
                     .respond(
                         tiny_http::Response::empty(302).with_header(
-                            tiny_http::Header::from_bytes(&b"Location"[..], signed_in_url.as_bytes())
-                                .map_err(|()| anyhow!("invalid redirect header"))?,
+                            tiny_http::Header::from_bytes(
+                                &b"Location"[..],
+                                signed_in_url.as_bytes(),
+                            )
+                            .map_err(|()| anyhow!("invalid redirect header"))?,
                         ),
                     )
                     .context("failed to respond to sign-in callback")?;
@@ -569,5 +633,33 @@ mod tests {
         ] {
             assert_eq!(github_prompt_field(prompt), None, "{prompt}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_is_rubiks_prime_agent_reads_the_help() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory =
+            std::env::temp_dir().join(format!("rubiks-prime-agent-check-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let fake_prime_agent = |name: &str, help: &str| {
+            let path = directory.join(name);
+            std::fs::write(&path, format!("#!/bin/sh\nprintf '%s\\n' '{help}'\n")).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let rubiks = fake_prime_agent(
+            "rubiks",
+            "Commands:\n  data       Browse saved sessions and harness data",
+        );
+        let upstream = fake_prime_agent("upstream", "Commands:\n  update     Update Prime Agent");
+
+        assert!(smol::block_on(is_rubiks_prime_agent(&rubiks)));
+        assert!(!smol::block_on(is_rubiks_prime_agent(&upstream)));
+        assert!(!smol::block_on(is_rubiks_prime_agent(
+            &directory.join("missing")
+        )));
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 }
