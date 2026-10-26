@@ -357,8 +357,13 @@ pub struct PrimeAgentDataView {
     items_list: ListState,
     rows_status: Option<SharedString>,
     items_status: Option<SharedString>,
+    /// The installed Prime Agent is not the Rubiks build (it has no `prime-agent
+    /// data`): the list offers to install it.
+    offer_rubiks_install: bool,
     load_rows: Task<()>,
     load_items: Task<()>,
+    /// The Rubiks-build check after a failed load, then the install.
+    install: Task<()>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -404,8 +409,10 @@ impl PrimeAgentDataView {
             items_list: ListState::new(0, ListAlignment::Top, px(1000.)),
             rows_status: Some("Loading…".into()),
             items_status: None,
+            offer_rubiks_install: false,
             load_rows: Task::ready(()),
             load_items: Task::ready(()),
+            install: Task::ready(()),
             _subscriptions: subscriptions,
         };
         this.reload_rows(Duration::ZERO, cx);
@@ -491,13 +498,69 @@ impl PrimeAgentDataView {
             Ok(rows) => {
                 self.searched_rows = rows;
                 self.rows_status = None;
+                self.offer_rubiks_install = false;
             }
             Err(error) => {
                 self.searched_rows.clear();
                 self.rows_status = Some(format!("{error:#}").into());
+                self.check_for_rubiks_build(cx);
             }
         }
         self.apply_date_range(cx);
+    }
+
+    /// After a failed load: when the installed Prime Agent is not the Rubiks
+    /// build, say so and offer to install it instead of showing its error.
+    fn check_for_rubiks_build(&mut self, cx: &mut Context<Self>) {
+        let program = self.program.clone();
+        self.install = cx.spawn(async move |this, cx| {
+            let is_rubiks = cx
+                .background_spawn(async move {
+                    client::rubiks_account::is_rubiks_prime_agent(&program).await
+                })
+                .await;
+            if is_rubiks {
+                return;
+            }
+            this.update(cx, |this, cx| {
+                this.rows_status = Some(
+                    "This Prime Agent has no `prime-agent data` command: it is not the Rubiks build. \
+                     Install Prime Agent (Rubiks) to browse sessions, research logs and harness memory."
+                        .into(),
+                );
+                this.offer_rubiks_install = true;
+                cx.notify();
+            })
+            .log_err();
+        });
+    }
+
+    fn install_rubiks_build(&mut self, cx: &mut Context<Self>) {
+        self.offer_rubiks_install = false;
+        self.rows_status = Some("Installing Prime Agent (Rubiks)…".into());
+        cx.notify();
+        self.install = cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(client::rubiks_account::install_rubiks_prime_agent())
+                .await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => {
+                        this.program = prime_agent_program();
+                        this.rows_status = Some("Loading…".into());
+                        this.reload_rows(Duration::ZERO, cx);
+                    }
+                    Err(error) => {
+                        this.rows_status = Some(
+                            format!("Could not install Prime Agent (Rubiks): {error:#}").into(),
+                        );
+                        this.offer_rubiks_install = true;
+                    }
+                }
+                cx.notify();
+            })
+            .log_err();
+        });
     }
 
     fn apply_date_range(&mut self, cx: &mut Context<Self>) {
@@ -834,7 +897,18 @@ impl PrimeAgentDataView {
             v_flex()
                 .flex_1()
                 .p_3()
+                .gap_2()
                 .child(Label::new(status).color(Color::Muted))
+                .when(self.offer_rubiks_install, |body| {
+                    body.child(
+                        Button::new(
+                            "prime-agent-data-install-rubiks",
+                            "Install Prime Agent (Rubiks)",
+                        )
+                        .style(ButtonStyle::Filled)
+                        .on_click(cx.listener(|this, _, _, cx| this.install_rubiks_build(cx))),
+                    )
+                })
                 .into_any_element()
         } else if self.rows.is_empty() {
             v_flex()
