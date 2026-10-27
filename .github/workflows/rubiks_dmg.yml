@@ -1,17 +1,21 @@
-# Builds the Rubiks IDE DMG for Apple silicon on every push to main (or by
-# hand from the Actions tab). Each run keeps the DMG as a workflow artifact
-# for 30 days, and pushes to main also replace the "ide-latest" release, so
-# the newest build is always at:
-#   https://github.com/<owner>/<repo>/releases/download/ide-latest/Rubiks-IDE-aarch64.dmg
+# Builds and publishes the Rubiks IDE DMG for Apple silicon on every push to
+# main (and by hand from the Actions tab). Each build gets its own version,
+# <major>.<minor>.<build number> (major and minor from crates/zed/Cargo.toml,
+# the build number from this workflow's run number), stamped into the app
+# before the build, and a run from main publishes it as a GitHub release
+# tagged v<version>, marked latest. The newest DMG is always at:
+#   https://github.com/<owner>/<repo>/releases/latest/download/Rubiks-IDE-aarch64.dmg
+# The IDE checks that release every hour and updates itself (crates/auto_update).
+# Older releases stay listed, so the version history is visible.
 #
 # The DMG is not notarized (there is no Apple Developer certificate), so
 # macOS blocks the first launch: right-click Rubiks IDE → Open, or run
 #   xattr -dr com.apple.quarantine "/Applications/Rubiks IDE.app"
-name: Rubiks IDE DMG
+name: Rubiks IDE release
 
-# Started by hand only (Actions tab → Run workflow): no push, tag, pull
-# request, issue or schedule runs.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 # A newer push makes an older build pointless: cancel it.
@@ -20,7 +24,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write # replaces the ide-latest release
+  contents: write # creates the release
 
 jobs:
   dmg:
@@ -61,6 +65,31 @@ jobs:
           # The release target directory is far over the cache size limit.
           cache-targets: "false"
 
+      - name: Pick the version
+        id: version
+        run: |
+          base="$(sed -n 's/^version *= *"\([0-9]*\.[0-9]*\)\..*/\1/p' crates/zed/Cargo.toml | head -1)"
+          test -n "$base"
+          version="${base}.${GITHUB_RUN_NUMBER}"
+          echo "Version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp the version into the app
+        # The app reports its crate version (and the bundle's Info.plist
+        # carries it); cargo updates Cargo.lock to match at build time.
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          path = "crates/zed/Cargo.toml"
+          text = open(path).read()
+          text, count = re.subn(r'(?m)^version = "[^"]+"', f'version = "{os.environ["VERSION"]}"', text, count=1)
+          assert count == 1, "no version in crates/zed/Cargo.toml"
+          open(path, "w").write(text)
+          PY
+          grep -n -m1 '^version' crates/zed/Cargo.toml
+
       - name: Build the DMG
         run: script/bundle-mac aarch64-apple-darwin
 
@@ -75,20 +104,24 @@ jobs:
       - name: Upload the DMG as a workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Rubiks-IDE-aarch64-${{ github.sha }}
+          name: Rubiks-IDE-aarch64-${{ steps.version.outputs.version }}
           path: ${{ steps.dmg.outputs.path }}
           retention-days: 30
           if-no-files-found: error
 
-      - name: Publish the ide-latest release
+      - name: Publish the release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           DMG: ${{ steps.dmg.outputs.path }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          gh release delete ide-latest --yes --cleanup-tag || true
-          gh release create ide-latest "$DMG" \
+          gh release create "v${VERSION}" "$DMG" \
             --target "$GITHUB_SHA" \
-            --prerelease \
-            --title "Rubiks IDE (latest main build)" \
-            --notes "Built from ${GITHUB_SHA} by run ${GITHUB_RUN_NUMBER}. Apple silicon only; not notarized: right-click Rubiks IDE → Open on first launch."
+            --latest \
+            --title "Rubiks IDE ${VERSION}" \
+            --notes "Built from ${GITHUB_SHA}. Apple silicon only.
+
+          Download Rubiks-IDE-aarch64.dmg, open it and drag Rubiks IDE to Applications. It is not notarized: on first launch right-click Rubiks IDE → Open (or run \`xattr -dr com.apple.quarantine \"/Applications/Rubiks IDE.app\"\`). Once installed, the IDE checks for new releases every hour and updates itself."
+          # The rolling pre-release this workflow used to publish.
+          gh release delete ide-latest --yes --cleanup-tag || true
