@@ -195,6 +195,67 @@ pub struct ReleaseAsset {
     pub url: String,
 }
 
+/// The Rubiks IDE updates from its own GitHub releases, not Zed's servers:
+/// every push to main publishes one (.github/workflows/rubiks_dmg.yml).
+const RUBIKS_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/rubiksworkspace/Rubiks-IDE/releases/latest";
+/// The DMG each Rubiks release carries; only Apple silicon builds are published.
+const RUBIKS_DMG_ASSET: &str = "Rubiks-IDE-aarch64.dmg";
+
+#[derive(Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+/// The newest Rubiks IDE release for this platform: its version (the tag,
+/// `v` dropped) and its DMG's download URL.
+async fn rubiks_release_asset(
+    http_client: &HttpClientWithUrl,
+    os: &str,
+    arch: &str,
+) -> Result<ReleaseAsset> {
+    anyhow::ensure!(
+        os == "macos" && arch == "aarch64",
+        "no Rubiks IDE build is published for {os} {arch}"
+    );
+    let mut response = http_client
+        .get(RUBIKS_LATEST_RELEASE_URL, Default::default(), true)
+        .await?;
+    let mut body = Vec::new();
+    response.body_mut().read_to_end(&mut body).await?;
+    anyhow::ensure!(
+        response.status().is_success(),
+        "failed to fetch the latest Rubiks IDE release: {:?}",
+        String::from_utf8_lossy(&body),
+    );
+    rubiks_release_from_github(&body)
+}
+
+fn rubiks_release_from_github(body: &[u8]) -> Result<ReleaseAsset> {
+    let release: GitHubRelease = serde_json::from_slice(body).with_context(|| {
+        format!(
+            "error deserializing the Rubiks IDE release {:?}",
+            String::from_utf8_lossy(body),
+        )
+    })?;
+    let dmg = release
+        .assets
+        .into_iter()
+        .find(|asset| asset.name == RUBIKS_DMG_ASSET)
+        .with_context(|| format!("release {} has no {RUBIKS_DMG_ASSET}", release.tag_name))?;
+    Ok(ReleaseAsset {
+        version: release.tag_name.trim_start_matches('v').to_string(),
+        url: dmg.browser_download_url,
+    })
+}
+
 struct MacOsUnmounter<'a> {
     mount_path: PathBuf,
     background_executor: &'a BackgroundExecutor,
@@ -684,6 +745,12 @@ impl AutoUpdater {
         cx: &mut AsyncApp,
     ) -> Result<ReleaseAsset> {
         let client = this.read_with(cx, |this, _| this.client.clone());
+
+        // The app itself updates from the Rubiks releases; other assets (the
+        // remote server) still come from Zed's servers.
+        if asset == "zed" {
+            return rubiks_release_asset(&client.http_client(), os, arch).await;
+        }
 
         let (system_id, metrics_id, is_staff) = if client.telemetry().metrics_enabled() {
             (
@@ -1883,5 +1950,31 @@ mod tests {
             newer_version.unwrap(),
             Some(fetched_version.parse().unwrap())
         );
+    }
+
+    #[test]
+    fn test_rubiks_release_from_github() {
+        let body = serde_json::json!({
+            "tag_name": "v1.22.7",
+            "assets": [
+                { "name": "notes.txt", "browser_download_url": "https://example.com/notes.txt" },
+                {
+                    "name": "Rubiks-IDE-aarch64.dmg",
+                    "browser_download_url": "https://github.com/rubiksworkspace/Rubiks-IDE/releases/download/v1.22.7/Rubiks-IDE-aarch64.dmg"
+                }
+            ]
+        })
+        .to_string();
+        let release = rubiks_release_from_github(body.as_bytes()).unwrap();
+        assert_eq!(
+            (release.version.as_str(), release.url.as_str()),
+            (
+                "1.22.7",
+                "https://github.com/rubiksworkspace/Rubiks-IDE/releases/download/v1.22.7/Rubiks-IDE-aarch64.dmg"
+            )
+        );
+
+        let without_dmg = serde_json::json!({ "tag_name": "v1.22.8", "assets": [] }).to_string();
+        assert!(rubiks_release_from_github(without_dmg.as_bytes()).is_err());
     }
 }

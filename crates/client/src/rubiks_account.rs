@@ -41,7 +41,12 @@ pub const RUBIKS_ACCOUNT_URL: &str = "https://rubiksworkspace.com";
 /// taken from the gateway, so the company setup cannot make the IDE run other
 /// commands.
 const RUBIKS_PRIME_AGENT_INSTALLER_URL: &str =
-    "https://github.com/rubiksworkspace/rubiks-harness/releases/download/harness-latest/install.sh";
+    "https://github.com/rubiksworkspace/rubiks-harness/releases/latest/download/install.sh";
+
+/// The newest Prime Agent (Rubiks) release: every push to the harness's main
+/// branch publishes one, tagged `v<version>`.
+const RUBIKS_PRIME_AGENT_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/rubiksworkspace/rubiks-harness/releases/latest";
 
 /// Prime Agent's official installer, for the platforms the Rubiks build is
 /// not published for.
@@ -382,8 +387,9 @@ fn prime_agent_binary() -> std::path::PathBuf {
 }
 
 /// Install Prime Agent when it is missing. Where a Rubiks build exists, also
-/// replace an installed upstream build: it lacks `prime-agent data`, so the
-/// Prime Agent Data tab cannot read it.
+/// replace an installed upstream build (it lacks `prime-agent data`, so the
+/// Prime Agent Data tab cannot read it) and update an installed Rubiks build
+/// when a newer release is published. Runs at every launch.
 async fn ensure_prime_agent() -> Result<()> {
     if cfg!(windows) {
         return Ok(());
@@ -397,7 +403,28 @@ async fn ensure_prime_agent() -> Result<()> {
         return run_prime_agent_installer(PRIME_AGENT_INSTALLER_URL).await;
     }
     if installed && is_rubiks_prime_agent(&binary).await {
-        return Ok(());
+        // Up to date unless a newer release is published; when the check
+        // cannot run (offline, rate-limited), keep the installed build.
+        let installed_version = prime_agent_version(&binary).await;
+        let latest_version = match latest_rubiks_prime_agent_version().await {
+            Ok(version) => version,
+            Err(error) => {
+                log::warn!("could not check for a newer Prime Agent (Rubiks): {error:#}");
+                return Ok(());
+            }
+        };
+        let newer = match installed_version.as_deref() {
+            Some(installed_version) => is_newer_version(&latest_version, installed_version),
+            None => true,
+        };
+        if !newer {
+            return Ok(());
+        }
+        log::info!(
+            "updating Prime Agent (Rubiks) from {} to {latest_version}",
+            installed_version.as_deref().unwrap_or("an unknown version")
+        );
+        return install_rubiks_prime_agent().await;
     }
     if installed {
         log::info!(
@@ -406,6 +433,56 @@ async fn ensure_prime_agent() -> Result<()> {
         );
     }
     install_rubiks_prime_agent().await
+}
+
+/// What `prime-agent --version` reports, if it runs.
+async fn prime_agent_version(binary: &std::path::Path) -> Option<String> {
+    let output = new_command(binary)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .ok()?;
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (output.status.success() && !version.is_empty()).then_some(version)
+}
+
+/// The newest Prime Agent (Rubiks) release's version: its tag, `v` dropped.
+async fn latest_rubiks_prime_agent_version() -> Result<String> {
+    let output = new_command("curl")
+        .args(["-fsSL", RUBIKS_PRIME_AGENT_LATEST_RELEASE_URL])
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .context("failed to run curl")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{RUBIKS_PRIME_AGENT_LATEST_RELEASE_URL}: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    #[derive(Deserialize)]
+    struct Release {
+        tag_name: String,
+    }
+    let release: Release = serde_json::from_slice(&output.stdout)
+        .context("unexpected answer from the GitHub releases API")?;
+    Ok(release.tag_name.trim_start_matches('v').to_string())
+}
+
+/// Whether `candidate` is a newer `major.minor.patch` than `current`. A
+/// version that does not parse is never newer.
+fn is_newer_version(candidate: &str, current: &str) -> bool {
+    let parse = |version: &str| -> Option<Vec<u64>> {
+        let core = version.split(['-', '+']).next()?;
+        core.split('.')
+            .map(|part| part.parse::<u64>().ok())
+            .collect::<Option<Vec<_>>>()
+            .filter(|parts| parts.len() == 3)
+    };
+    match (parse(candidate), parse(current)) {
+        (Some(candidate), Some(current)) => candidate > current,
+        _ => false,
+    }
 }
 
 /// Install (or reinstall) Prime Agent (Rubiks) from its latest release.
@@ -661,5 +738,17 @@ mod tests {
             &directory.join("missing")
         )));
         std::fs::remove_dir_all(&directory).unwrap();
+    }
+
+    #[test]
+    fn test_is_newer_version() {
+        assert!(is_newer_version("0.10.12", "0.10.9"));
+        assert!(is_newer_version("0.11.0", "0.10.40"));
+        assert!(!is_newer_version("0.10.12", "0.10.12"));
+        assert!(!is_newer_version("0.10.8", "0.10.12"));
+        // The upstream build reports a pre-release or build suffix sometimes.
+        assert!(is_newer_version("0.10.3", "0.10.0-continuous.0123abc"));
+        assert!(!is_newer_version("not-a-version", "0.10.0"));
+        assert!(!is_newer_version("0.10.3", "garbage"));
     }
 }
