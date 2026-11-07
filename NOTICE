@@ -1,0 +1,23 @@
+Rubiks IDE
+https://github.com/rubiksworkspace/Rubiks-IDE
+
+Rubiks IDE is a modified version of Zed (https://github.com/zed-industries/zed).
+
+Zed is Copyright 2022 - 2025 Zed Industries, Inc. and the Zed contributors,
+and is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components
+where marked.
+
+The Rubiks Workspace authors have modified this code, starting on 2026-10-13.
+The changes add Rubiks Workspace sign-in and company settings, Prime Agent
+(Rubiks) installation and updates, the Prime Agent Data tab, updates from this
+repository's GitHub releases, and Rubiks branding. The git history records each
+change and its date.
+
+These modifications are released under the same licenses as the code they
+modify: GPL-3.0-or-later (LICENSE-GPL), with Apache-2.0 (LICENSE-APACHE) where
+marked. Each crate's Cargo.toml states its license.
+
+Rubiks IDE is not made, endorsed or supported by Zed Industries, Inc.
+
+Third party dependencies keep their own licenses; script/generate-licenses
+collects them when a build is bundled, and they are baked into the binaries.
