@@ -5,6 +5,7 @@ use crate::{
         self, CompareWithBranch, DeployBranchDiff, ProjectDiff, ReviewDiff,
         render_send_review_to_agent_button,
     },
+    review_evidence::ReviewEvidence,
 };
 use agent_settings::AgentSettings;
 use anyhow::{Context as _, Result, anyhow};
@@ -31,6 +32,7 @@ use std::{
     sync::Arc,
 };
 use ui::{DiffStat, Divider, PopoverMenu, Tooltip, prelude::*};
+use util::ResultExt as _;
 use workspace::{
     ItemHandle, ItemNavHistory, SerializableItem, ToolbarItemEvent, ToolbarItemLocation,
     ToolbarItemView, Workspace,
@@ -49,6 +51,8 @@ pub struct BranchDiff {
     diff: Entity<DiffMultibuffer>,
     project: Entity<Project>,
     workspace: WeakEntity<Workspace>,
+    evidence: Option<ReviewEvidence>,
+    _load_evidence: Task<()>,
     _diff_event_subscription: Subscription,
 }
 
@@ -362,14 +366,50 @@ impl BranchDiff {
         cx: &mut Context<Self>,
     ) -> Self {
         let diff_event_subscription = cx.subscribe(&diff, |_, _, event: &EditorEvent, cx| {
+            // The evidence panel follows the file under the cursor.
+            if matches!(event, EditorEvent::SelectionsChanged { .. }) {
+                cx.notify();
+            }
             cx.emit(event.clone())
         });
+        let load_evidence = Self::load_evidence(&diff, cx);
         Self {
             diff,
             project,
             workspace: workspace.downgrade(),
+            evidence: None,
+            _load_evidence: load_evidence,
             _diff_event_subscription: diff_event_subscription,
         }
+    }
+
+    fn load_evidence(diff: &Entity<DiffMultibuffer>, cx: &mut Context<Self>) -> Task<()> {
+        let Some(work_directory) = diff
+            .read(cx)
+            .repo(cx)
+            .map(|repo| repo.read(cx).work_directory_abs_path.clone())
+        else {
+            return Task::ready(());
+        };
+        cx.spawn(async move |this, cx| {
+            let evidence = cx
+                .background_spawn(async move { ReviewEvidence::load(&work_directory) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.evidence = evidence;
+                cx.notify();
+            })
+            .log_err();
+        })
+    }
+
+    fn active_repo_path(&self, cx: &App) -> Option<String> {
+        let project_path = self.diff.read(cx).active_project_path(cx)?;
+        let repo_path = self
+            .repo(cx)?
+            .read(cx)
+            .project_path_to_repo_path(&project_path, cx)?;
+        Some(repo_path.as_unix_str().to_string())
     }
 
     pub(crate) fn diff_base<'a>(&'a self, cx: &'a App) -> &'a DiffBase {
@@ -586,6 +626,7 @@ impl Item for BranchDiff {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<()>> {
+        self._load_evidence = Self::load_evidence(&self.diff, cx);
         self.diff
             .update(cx, |diff, cx| diff.reload(project, window, cx))
     }
@@ -633,10 +674,14 @@ impl Item for BranchDiff {
 
 impl Render for BranchDiff {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let path = self.active_repo_path(cx);
+        h_flex()
             .size_full()
             .on_action(cx.listener(Self::review_diff))
-            .child(self.diff.clone())
+            .child(div().flex_1().h_full().min_w_0().child(self.diff.clone()))
+            .when_some(self.evidence.as_ref(), |this, evidence| {
+                this.child(evidence.render(path.as_deref(), cx))
+            })
     }
 }
 
