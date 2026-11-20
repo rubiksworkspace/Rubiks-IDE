@@ -51,6 +51,7 @@ pub mod picker_prompt;
 pub mod project_diff;
 pub(crate) mod remote_output;
 pub mod repository_selector;
+mod review_evidence;
 pub mod solo_diff_view;
 pub mod staged_diff;
 pub mod stash_picker;
@@ -328,9 +329,11 @@ pub fn init(cx: &mut App) {
                 GitCloneModal::show(panel, window, cx)
             });
         });
-        workspace.register_action(|workspace, _: &zed_actions::rubiks::CloneRepository, window, cx| {
-            clone::clone_from_rubiks(workspace, window, cx);
-        });
+        workspace.register_action(
+            |workspace, _: &zed_actions::rubiks::CloneRepository, window, cx| {
+                clone::clone_from_rubiks(workspace, window, cx);
+            },
+        );
         workspace.register_action(|workspace, _: &git::OpenModifiedFiles, window, cx| {
             open_modified_files(workspace, window, cx);
         });
