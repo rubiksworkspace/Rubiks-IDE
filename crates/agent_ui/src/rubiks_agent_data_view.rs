@@ -1,5 +1,5 @@
-//! A tab for browsing Prime Agent's saved data. Everything comes from
-//! `prime-agent data … --json`, so it shows exactly what that command shows:
+//! A tab for browsing the Rubiks agent's saved data. Everything comes from
+//! `rubiks data … --json`, so it shows exactly what that command shows:
 //! saved sessions (chat, thinking, tool calls, usage, events, raw records),
 //! the harness memory refinements build up (memories, prompts, skills,
 //! subagents and the refinements themselves) and the research log (run
@@ -285,23 +285,21 @@ impl Render for DraggedDivider {
     }
 }
 
-/// The installed Prime Agent: `RUBIKS_PRIME_AGENT_BIN` when set, else where
-/// its installer puts it, else whatever `prime-agent` is on PATH.
-fn prime_agent_program() -> PathBuf {
-    if let Some(program) =
-        std::env::var_os("RUBIKS_PRIME_AGENT_BIN").filter(|value| !value.is_empty())
-    {
+/// The installed Rubiks agent: `RUBIKS_AGENT_BIN` when set, else where
+/// its installer puts it, else whatever `rubiks` is on PATH.
+fn rubiks_agent_program() -> PathBuf {
+    if let Some(program) = std::env::var_os("RUBIKS_AGENT_BIN").filter(|value| !value.is_empty()) {
         return PathBuf::from(program);
     }
-    let installed = util::paths::home_dir().join(".local/bin/prime-agent");
+    let installed = util::paths::home_dir().join(".local/bin/rubiks");
     if installed.exists() {
         installed
     } else {
-        PathBuf::from("prime-agent")
+        PathBuf::from("rubiks")
     }
 }
 
-/// Run `prime-agent` with `args` and parse its JSON output.
+/// Run `rubiks` with `args` and parse its JSON output.
 async fn run_json<T: DeserializeOwned>(program: PathBuf, args: Vec<String>) -> Result<T> {
     let output = util::command::new_command(&program)
         .args(&args)
@@ -312,7 +310,7 @@ async fn run_json<T: DeserializeOwned>(program: PathBuf, args: Vec<String>) -> R
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(anyhow!("{}", stderr.trim().trim_start_matches("Error: ")));
     }
-    serde_json::from_slice(&output.stdout).context("unexpected output from prime-agent data")
+    serde_json::from_slice(&output.stdout).context("unexpected output from rubiks data")
 }
 
 fn local_time(timestamp: &str) -> Option<DateTime<Local>> {
@@ -329,15 +327,15 @@ fn format_when(when: Option<DateTime<Local>>, raw: &str) -> String {
 }
 
 pub fn open(workspace: &mut Workspace, window: &mut Window, cx: &mut Context<Workspace>) {
-    if let Some(existing) = workspace.item_of_type::<PrimeAgentDataView>(cx) {
+    if let Some(existing) = workspace.item_of_type::<RubiksAgentDataView>(cx) {
         workspace.activate_item(&existing, true, true, window, cx);
         return;
     }
-    let view = cx.new(|cx| PrimeAgentDataView::new(window, cx));
+    let view = cx.new(|cx| RubiksAgentDataView::new(window, cx));
     workspace.add_item_to_active_pane(Box::new(view), None, true, window, cx);
 }
 
-pub struct PrimeAgentDataView {
+pub struct RubiksAgentDataView {
     focus_handle: FocusHandle,
     program: PathBuf,
     source: Source,
@@ -357,7 +355,7 @@ pub struct PrimeAgentDataView {
     items_list: ListState,
     rows_status: Option<SharedString>,
     items_status: Option<SharedString>,
-    /// The installed Prime Agent is not the Rubiks build (it has no `prime-agent
+    /// The installed agent is not the Rubiks build (it has no `rubiks
     /// data`): the list offers to install it.
     offer_rubiks_install: bool,
     load_rows: Task<()>,
@@ -367,7 +365,7 @@ pub struct PrimeAgentDataView {
     _subscriptions: Vec<Subscription>,
 }
 
-impl PrimeAgentDataView {
+impl RubiksAgentDataView {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let list_search = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
@@ -393,7 +391,7 @@ impl PrimeAgentDataView {
         ];
         let mut this = Self {
             focus_handle: cx.focus_handle(),
-            program: prime_agent_program(),
+            program: rubiks_agent_program(),
             source: Source::Sessions,
             list_search,
             item_search,
@@ -509,14 +507,14 @@ impl PrimeAgentDataView {
         self.apply_date_range(cx);
     }
 
-    /// After a failed load: when the installed Prime Agent is not the Rubiks
+    /// After a failed load: when the installed agent is not the Rubiks
     /// build, say so and offer to install it instead of showing its error.
     fn check_for_rubiks_build(&mut self, cx: &mut Context<Self>) {
         let program = self.program.clone();
         self.install = cx.spawn(async move |this, cx| {
             let is_rubiks = cx
                 .background_spawn(async move {
-                    client::rubiks_account::is_rubiks_prime_agent(&program).await
+                    client::rubiks_account::is_rubiks_rubiks_agent(&program).await
                 })
                 .await;
             if is_rubiks {
@@ -524,8 +522,8 @@ impl PrimeAgentDataView {
             }
             this.update(cx, |this, cx| {
                 this.rows_status = Some(
-                    "This Prime Agent has no `prime-agent data` command: it is not the Rubiks build. \
-                     Install Prime Agent (Rubiks) to browse sessions, research logs and harness memory."
+                    "This agent has no `rubiks data` command: it is not the Rubiks build. \
+                     Install the Rubiks agent to browse sessions, research logs and harness memory."
                         .into(),
                 );
                 this.offer_rubiks_install = true;
@@ -537,23 +535,22 @@ impl PrimeAgentDataView {
 
     fn install_rubiks_build(&mut self, cx: &mut Context<Self>) {
         self.offer_rubiks_install = false;
-        self.rows_status = Some("Installing Prime Agent (Rubiks)…".into());
+        self.rows_status = Some("Installing the Rubiks agent…".into());
         cx.notify();
         self.install = cx.spawn(async move |this, cx| {
             let result = cx
-                .background_spawn(client::rubiks_account::install_rubiks_prime_agent())
+                .background_spawn(client::rubiks_account::install_rubiks_rubiks_agent())
                 .await;
             this.update(cx, |this, cx| {
                 match result {
                     Ok(()) => {
-                        this.program = prime_agent_program();
+                        this.program = rubiks_agent_program();
                         this.rows_status = Some("Loading…".into());
                         this.reload_rows(Duration::ZERO, cx);
                     }
                     Err(error) => {
-                        this.rows_status = Some(
-                            format!("Could not install Prime Agent (Rubiks): {error:#}").into(),
-                        );
+                        this.rows_status =
+                            Some(format!("Could not install the Rubiks agent: {error:#}").into());
                         this.offer_rubiks_install = true;
                     }
                 }
@@ -743,7 +740,7 @@ impl PrimeAgentDataView {
         let id = row.id.clone();
         let colors = cx.theme().colors();
         v_flex()
-            .id(("prime-agent-row", index))
+            .id(("rubiks-agent-row", index))
             .px_3()
             .py_2()
             .gap_0p5()
@@ -814,7 +811,7 @@ impl PrimeAgentDataView {
         };
         let colors = cx.theme().colors();
         v_flex()
-            .id(("prime-agent-item", index))
+            .id(("rubiks-agent-item", index))
             .px_3()
             .py_2()
             .gap_1()
@@ -890,7 +887,7 @@ impl PrimeAgentDataView {
             Source::Sessions => "No sessions match.",
             Source::Harness => "No harness memory matches.",
             Source::Research => {
-                "No research logs yet. New sessions write one once Prime Agent runs the new build."
+                "No research logs yet. New sessions write one once the Rubiks agent runs the new build."
             }
         };
         let body = if let Some(status) = self.rows_status.clone() {
@@ -902,8 +899,8 @@ impl PrimeAgentDataView {
                 .when(self.offer_rubiks_install, |body| {
                     body.child(
                         Button::new(
-                            "prime-agent-data-install-rubiks",
-                            "Install Prime Agent (Rubiks)",
+                            "rubiks-agent-data-install-rubiks",
+                            "Install the Rubiks agent",
                         )
                         .style(ButtonStyle::Filled)
                         .on_click(cx.listener(|this, _, _, cx| this.install_rubiks_build(cx))),
@@ -954,7 +951,7 @@ impl PrimeAgentDataView {
                                     .color(Color::Muted),
                             )
                             .child(
-                                IconButton::new("prime-agent-data-refresh", IconName::RotateCw)
+                                IconButton::new("rubiks-agent-data-refresh", IconName::RotateCw)
                                     .tooltip(Tooltip::text("Reload"))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.reload_rows(Duration::ZERO, cx)
@@ -969,7 +966,7 @@ impl PrimeAgentDataView {
                     .gap_2()
                     .child(Self::search_box(&self.list_search, cx))
                     .child(DropdownMenu::new(
-                        "prime-agent-date-range",
+                        "rubiks-agent-date-range",
                         current.label(),
                         date_menu,
                     )),
@@ -980,7 +977,7 @@ impl PrimeAgentDataView {
     fn render_divider(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = cx.theme().colors();
         div()
-            .id("prime-agent-data-divider")
+            .id("rubiks-agent-data-divider")
             .flex_none()
             .w(px(5.))
             .h_full()
@@ -1082,7 +1079,7 @@ impl PrimeAgentDataView {
                     .py_2()
                     .gap_2()
                     .child(DropdownMenu::new(
-                        "prime-agent-kind",
+                        "rubiks-agent-kind",
                         self.kind_label(current),
                         kind_menu,
                     ))
@@ -1093,21 +1090,21 @@ impl PrimeAgentDataView {
     }
 }
 
-impl EventEmitter<()> for PrimeAgentDataView {}
+impl EventEmitter<()> for RubiksAgentDataView {}
 
-impl Focusable for PrimeAgentDataView {
+impl Focusable for RubiksAgentDataView {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Item for PrimeAgentDataView {
+impl Item for RubiksAgentDataView {
     type Event = ();
 
     fn to_item_events(_: &Self::Event, _: &mut dyn FnMut(ItemEvent)) {}
 
     fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
-        "Prime Agent Data".into()
+        "Rubiks Agent Data".into()
     }
 
     fn telemetry_event_text(&self) -> Option<&'static str> {
@@ -1115,10 +1112,10 @@ impl Item for PrimeAgentDataView {
     }
 }
 
-impl Render for PrimeAgentDataView {
+impl Render for RubiksAgentDataView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
-            .key_context("PrimeAgentDataView")
+            .key_context("RubiksAgentDataView")
             .track_focus(&self.focus_handle)
             .size_full()
             .bg(cx.theme().colors().editor_background)

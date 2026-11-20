@@ -1,14 +1,14 @@
-//! Research records the IDE writes for Prime Agent sessions: how agent edits
+//! Research records the IDE writes for Rubiks agent sessions: how agent edits
 //! were reviewed, how long accepted agent lines survive and where the code
-//! came from, and the session survey. Records go to Prime Agent's research
+//! came from, and the session survey. Records go to the Rubiks agent's research
 //! directory, `<agent dir>/research/ide/<ACP session id>.jsonl`, where
-//! `prime-agent data research` joins them to the session they belong to.
+//! `rubiks data research` joins them to the session they belong to.
 //!
 //! The IDE keeps no code here: accepted lines are remembered as hashes, and
 //! survival is measured by finding those hashes in the file later. Writes
 //! happen on a background thread; nothing waits on the disk.
 //!
-//! Prime Agent's `research` settings apply: `enabled: false` (or
+//! The Rubiks agent's `research` settings apply: `enabled: false` (or
 //! `PRIME_AGENT_RESEARCH=0`) turns these records off too.
 
 use std::collections::HashMap;
@@ -34,7 +34,7 @@ enum Job {
     CheckSurvival,
 }
 
-/// Prime Agent's directory: `PRIME_AGENT_CODING_AGENT_DIR`, else
+/// The Rubiks agent's directory: `PRIME_AGENT_CODING_AGENT_DIR`, else
 /// `~/.prime/agent`.
 fn agent_dir() -> PathBuf {
     match std::env::var_os("PRIME_AGENT_CODING_AGENT_DIR").filter(|dir| !dir.is_empty()) {
@@ -47,7 +47,7 @@ fn ide_dir(agent_dir: &Path) -> PathBuf {
     agent_dir.join("research").join("ide")
 }
 
-/// Whether Prime Agent's research log is on (read once per IDE run).
+/// Whether the Rubiks agent's research log is on (read once per IDE run).
 fn enabled(agent_dir: &Path) -> bool {
     match std::env::var("PRIME_AGENT_RESEARCH")
         .ok()

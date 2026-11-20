@@ -8,8 +8,8 @@ and is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components
 where marked.
 
 The Rubiks Workspace authors have modified this code, starting on 2026-10-13.
-The changes add Rubiks Workspace sign-in and company settings, Prime Agent
-(Rubiks) installation and updates, the Prime Agent Data tab, updates from this
+The changes add Rubiks Workspace sign-in and company settings, Rubiks agent
+installation and updates, the Rubiks Agent Data tab, updates from this
 repository's GitHub releases, and Rubiks branding. The git history records each
 change and its date.
 

@@ -2,7 +2,7 @@
 > Remove this line to confirm you've reviewed this PR before submitting.
 # Rubiks IDE
 
-Rubiks IDE is a code editor for [Rubiks Workspace](https://rubiksworkspace.com), integrated with [Prime Agent (Rubiks)](https://github.com/rubiksworkspace/rubiks-harness). It is a modified version of [Zed](https://github.com/zed-industries/zed), the high-performance, multiplayer code editor from Zed Industries.
+Rubiks IDE is a code editor for [Rubiks Workspace](https://rubiksworkspace.com), integrated with the [Rubiks agent](https://github.com/rubiksworkspace/rubiks-releases). It is a modified version of [Zed](https://github.com/zed-industries/zed), the high-performance, multiplayer code editor from Zed Industries.
 
 Rubiks IDE is an independent project. It is not made, endorsed or supported by Zed Industries, so please report problems [here](https://github.com/rubiksworkspace/Rubiks-IDE/issues), not to the Zed project.
 
@@ -20,13 +20,13 @@ Rubiks IDE is published for Apple silicon Macs.
    xattr -dr com.apple.quarantine "/Applications/Rubiks IDE.app"
    ```
 
-Once installed, the IDE checks for a new release every hour and updates itself. When you are signed in and your company setup includes Prime Agent, each launch also installs or updates Prime Agent (Rubiks).
+Once installed, the IDE checks for a new release every hour and updates itself. When you are signed in and your company setup includes the Rubiks agent, each launch also installs or updates it.
 
 ### What differs from Zed
 
 - Rubiks Workspace sign-in, with company settings applied by role.
-- Prime Agent (Rubiks), installed and kept up to date by the IDE.
-- A Prime Agent Data tab for browsing saved sessions, research logs and harness memory, plus session surveys.
+- The Rubiks agent, installed and kept up to date by the IDE.
+- A Rubiks Agent Data tab for browsing saved sessions, research logs and harness memory, plus session surveys.
 - Updates come from this repository's GitHub releases instead of Zed's servers.
 - Rubiks branding: name, icons and themes.
 

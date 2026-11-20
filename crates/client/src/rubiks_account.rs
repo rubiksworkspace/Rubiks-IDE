@@ -9,8 +9,8 @@
 //!
 //! Once signed in, the gateway's company setup (`/api/ide/config`) is applied as
 //! the organization settings layer. Its contents follow the user's portal role:
-//! developers and admins get Prime Agent with its LLM keys, guests do not.
-//! For them, Prime Agent is installed if missing, and git's HTTPS prompts for
+//! developers and admins get the Rubiks agent with its LLM keys, guests do not.
+//! For them, the agent is installed if missing, and git's HTTPS prompts for
 //! github.com are answered with the GitHub access granted at sign-in.
 
 use std::{sync::Arc, time::Duration};
@@ -35,18 +35,18 @@ pub const DEFAULT_RUBIKS_SERVER_URL: &str = "https://api.rubiksworkspace.com";
 /// Where "your account" links go: the Rubiks Workspace site, not the API host.
 pub const RUBIKS_ACCOUNT_URL: &str = "https://rubiksworkspace.com";
 
-/// The installer of Prime Agent (Rubiks), the harness build this IDE is made
-/// for: its `prime-agent data` command backs the Prime Agent Data tab, and it
+/// The installer of the Rubiks agent, the harness build this IDE is made
+/// for: its `rubiks data` command backs the Rubiks Agent Data tab, and it
 /// keeps telemetry off. Published for Apple silicon. Fixed here rather than
 /// taken from the gateway, so the company setup cannot make the IDE run other
 /// commands.
-const RUBIKS_PRIME_AGENT_INSTALLER_URL: &str =
-    "https://github.com/rubiksworkspace/rubiks-harness/releases/latest/download/install.sh";
+const RUBIKS_AGENT_INSTALLER_URL: &str =
+    "https://github.com/rubiksworkspace/rubiks-releases/releases/latest/download/install.sh";
 
-/// The newest Prime Agent (Rubiks) release: every push to the harness's main
+/// The newest the Rubiks agent release: every push to the harness's main
 /// branch publishes one, tagged `v<version>`.
-const RUBIKS_PRIME_AGENT_LATEST_RELEASE_URL: &str =
-    "https://api.github.com/repos/rubiksworkspace/rubiks-harness/releases/latest";
+const RUBIKS_AGENT_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/rubiksworkspace/rubiks-releases/releases/latest";
 
 /// Prime Agent's official installer, for the platforms the Rubiks build is
 /// not published for.
@@ -107,7 +107,7 @@ struct CompanySetup {
 #[serde(rename_all = "camelCase")]
 struct CompanyFeatures {
     #[serde(default)]
-    prime_agent: bool,
+    rubiks_agent: bool,
 }
 
 #[derive(Deserialize)]
@@ -235,8 +235,8 @@ impl RubiksAccount {
             .log_err();
             log::info!("applied Rubiks company setup v{}", setup.version);
 
-            if setup.features.prime_agent {
-                cx.background_spawn(ensure_prime_agent()).await.log_err();
+            if setup.features.rubiks_agent {
+                cx.background_spawn(ensure_rubiks_agent()).await.log_err();
             }
         }));
     }
@@ -381,35 +381,41 @@ fn github_prompt_field(prompt: &str) -> Option<GitPromptField> {
     }
 }
 
-/// Where Prime Agent's installer puts its launcher.
-fn prime_agent_binary() -> std::path::PathBuf {
-    util::paths::home_dir().join(".local/bin/prime-agent")
+/// Where the installer puts its launcher. The Rubiks build installs `rubiks`;
+/// upstream Prime Agent, used where no Rubiks build exists, installs `prime-agent`.
+fn rubiks_agent_binary() -> std::path::PathBuf {
+    let launcher = if RUBIKS_BUILD_PLATFORM {
+        "rubiks"
+    } else {
+        "prime-agent"
+    };
+    util::paths::home_dir().join(".local/bin").join(launcher)
 }
 
-/// Install Prime Agent when it is missing. Where a Rubiks build exists, also
-/// replace an installed upstream build (it lacks `prime-agent data`, so the
-/// Prime Agent Data tab cannot read it) and update an installed Rubiks build
+/// Install the agent when it is missing. Where a Rubiks build exists, also
+/// replace an installed upstream build (it lacks `rubiks data`, so the
+/// Rubiks Agent Data tab cannot read it) and update an installed Rubiks build
 /// when a newer release is published. Runs at every launch.
-async fn ensure_prime_agent() -> Result<()> {
+async fn ensure_rubiks_agent() -> Result<()> {
     if cfg!(windows) {
         return Ok(());
     }
-    let binary = prime_agent_binary();
+    let binary = rubiks_agent_binary();
     let installed = smol::fs::metadata(&binary).await.is_ok();
     if !RUBIKS_BUILD_PLATFORM {
         if installed {
             return Ok(());
         }
-        return run_prime_agent_installer(PRIME_AGENT_INSTALLER_URL).await;
+        return run_rubiks_agent_installer(PRIME_AGENT_INSTALLER_URL).await;
     }
-    if installed && is_rubiks_prime_agent(&binary).await {
+    if installed && is_rubiks_rubiks_agent(&binary).await {
         // Up to date unless a newer release is published; when the check
         // cannot run (offline, rate-limited), keep the installed build.
-        let installed_version = prime_agent_version(&binary).await;
-        let latest_version = match latest_rubiks_prime_agent_version().await {
+        let installed_version = rubiks_agent_version(&binary).await;
+        let latest_version = match latest_rubiks_rubiks_agent_version().await {
             Ok(version) => version,
             Err(error) => {
-                log::warn!("could not check for a newer Prime Agent (Rubiks): {error:#}");
+                log::warn!("could not check for a newer Rubiks agent: {error:#}");
                 return Ok(());
             }
         };
@@ -421,10 +427,10 @@ async fn ensure_prime_agent() -> Result<()> {
             return Ok(());
         }
         log::info!(
-            "updating Prime Agent (Rubiks) from {} to {latest_version}",
+            "updating the Rubiks agent from {} to {latest_version}",
             installed_version.as_deref().unwrap_or("an unknown version")
         );
-        return install_rubiks_prime_agent().await;
+        return install_rubiks_rubiks_agent().await;
     }
     if installed {
         log::info!(
@@ -432,11 +438,11 @@ async fn ensure_prime_agent() -> Result<()> {
             binary.display()
         );
     }
-    install_rubiks_prime_agent().await
+    install_rubiks_rubiks_agent().await
 }
 
-/// What `prime-agent --version` reports, if it runs.
-async fn prime_agent_version(binary: &std::path::Path) -> Option<String> {
+/// What the agent's `--version` reports, if it runs.
+async fn rubiks_agent_version(binary: &std::path::Path) -> Option<String> {
     let output = new_command(binary)
         .arg("--version")
         .stdin(Stdio::null())
@@ -447,17 +453,17 @@ async fn prime_agent_version(binary: &std::path::Path) -> Option<String> {
     (output.status.success() && !version.is_empty()).then_some(version)
 }
 
-/// The newest Prime Agent (Rubiks) release's version: its tag, `v` dropped.
-async fn latest_rubiks_prime_agent_version() -> Result<String> {
+/// The newest the Rubiks agent release's version: its tag, `v` dropped.
+async fn latest_rubiks_rubiks_agent_version() -> Result<String> {
     let output = new_command("curl")
-        .args(["-fsSL", RUBIKS_PRIME_AGENT_LATEST_RELEASE_URL])
+        .args(["-fsSL", RUBIKS_AGENT_LATEST_RELEASE_URL])
         .stdin(Stdio::null())
         .output()
         .await
         .context("failed to run curl")?;
     anyhow::ensure!(
         output.status.success(),
-        "{RUBIKS_PRIME_AGENT_LATEST_RELEASE_URL}: {}",
+        "{RUBIKS_AGENT_LATEST_RELEASE_URL}: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
     #[derive(Deserialize)]
@@ -485,19 +491,19 @@ fn is_newer_version(candidate: &str, current: &str) -> bool {
     }
 }
 
-/// Install (or reinstall) Prime Agent (Rubiks) from its latest release.
-pub async fn install_rubiks_prime_agent() -> Result<()> {
+/// Install (or reinstall) the Rubiks agent from its latest release.
+pub async fn install_rubiks_rubiks_agent() -> Result<()> {
     anyhow::ensure!(
         RUBIKS_BUILD_PLATFORM,
-        "Prime Agent (Rubiks) is published for Apple silicon Macs only"
+        "The Rubiks agent is published for Apple silicon Macs only"
     );
-    run_prime_agent_installer(RUBIKS_PRIME_AGENT_INSTALLER_URL).await
+    run_rubiks_agent_installer(RUBIKS_AGENT_INSTALLER_URL).await
 }
 
 /// Whether `binary` is the Rubiks build: its help lists the `data` command.
 /// Asking for help never starts a session, unlike running `data` on a build
 /// that does not know it.
-pub async fn is_rubiks_prime_agent(binary: &std::path::Path) -> bool {
+pub async fn is_rubiks_rubiks_agent(binary: &std::path::Path) -> bool {
     let Ok(output) = new_command(binary)
         .arg("--help")
         .stdin(Stdio::null())
@@ -512,10 +518,10 @@ pub async fn is_rubiks_prime_agent(binary: &std::path::Path) -> bool {
             .any(|line| line.trim_start().starts_with("data "))
 }
 
-async fn run_prime_agent_installer(installer_url: &str) -> Result<()> {
+async fn run_rubiks_agent_installer(installer_url: &str) -> Result<()> {
     log::info!(
-        "installing Prime Agent to {} from {installer_url}",
-        prime_agent_binary().display()
+        "installing the agent to {} from {installer_url}",
+        rubiks_agent_binary().display()
     );
     let output = new_command("sh")
         .args(["-c", &format!("curl -fsSL {installer_url} | sh")])
@@ -523,13 +529,13 @@ async fn run_prime_agent_installer(installer_url: &str) -> Result<()> {
         .stdin(Stdio::null())
         .output()
         .await
-        .context("failed to run the Prime Agent installer")?;
+        .context("failed to run the agent installer")?;
     anyhow::ensure!(
         output.status.success(),
-        "the Prime Agent installer failed: {}",
+        "the agent installer failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     );
-    log::info!("installed Prime Agent");
+    log::info!("installed the agent");
     Ok(())
 }
 
@@ -714,27 +720,27 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn test_is_rubiks_prime_agent_reads_the_help() {
+    fn test_is_rubiks_rubiks_agent_reads_the_help() {
         use std::os::unix::fs::PermissionsExt as _;
 
         let directory =
-            std::env::temp_dir().join(format!("rubiks-prime-agent-check-{}", std::process::id()));
+            std::env::temp_dir().join(format!("rubiks-agent-check-{}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
-        let fake_prime_agent = |name: &str, help: &str| {
+        let fake_rubiks_agent = |name: &str, help: &str| {
             let path = directory.join(name);
             std::fs::write(&path, format!("#!/bin/sh\nprintf '%s\\n' '{help}'\n")).unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             path
         };
-        let rubiks = fake_prime_agent(
+        let rubiks = fake_rubiks_agent(
             "rubiks",
             "Commands:\n  data       Browse saved sessions and harness data",
         );
-        let upstream = fake_prime_agent("upstream", "Commands:\n  update     Update Prime Agent");
+        let upstream = fake_rubiks_agent("upstream", "Commands:\n  update     Update Prime Agent");
 
-        assert!(smol::block_on(is_rubiks_prime_agent(&rubiks)));
-        assert!(!smol::block_on(is_rubiks_prime_agent(&upstream)));
-        assert!(!smol::block_on(is_rubiks_prime_agent(
+        assert!(smol::block_on(is_rubiks_rubiks_agent(&rubiks)));
+        assert!(!smol::block_on(is_rubiks_rubiks_agent(&upstream)));
+        assert!(!smol::block_on(is_rubiks_rubiks_agent(
             &directory.join("missing")
         )));
         std::fs::remove_dir_all(&directory).unwrap();

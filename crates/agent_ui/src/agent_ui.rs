@@ -23,8 +23,8 @@ mod message_editor;
 mod mode_selector;
 mod model_selector;
 mod model_selector_popover;
-mod prime_agent_data_view;
 mod profile_selector;
+mod rubiks_agent_data_view;
 mod session_survey;
 mod terminal_codegen;
 mod terminal_inline_assistant;
@@ -251,8 +251,8 @@ actions!(
         OpenActiveThreadAsMarkdown,
         /// Opens the agent diff view to review changes.
         OpenAgentDiff,
-        /// Opens a tab for browsing Prime Agent's saved sessions, chat, tool calls and usage.
-        OpenPrimeAgentData,
+        /// Opens a tab for browsing the Rubiks agent's saved sessions, chat, tool calls and usage.
+        OpenRubiksAgentData,
         /// Rates the current agent session (NASA-TLX workload and sense of agency) for Rubiks research.
         RateSession,
         /// Copies the current thread to the clipboard as JSON for debugging.
@@ -662,10 +662,10 @@ pub fn init(
     cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
         workspace.register_action(
             |workspace: &mut Workspace,
-             _: &OpenPrimeAgentData,
+             _: &OpenRubiksAgentData,
              window: &mut Window,
              cx: &mut Context<Workspace>| {
-                prime_agent_data_view::open(workspace, window, cx);
+                rubiks_agent_data_view::open(workspace, window, cx);
             },
         );
         workspace.register_action(

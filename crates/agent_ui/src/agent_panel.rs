@@ -50,7 +50,7 @@ use crate::{
 };
 use crate::{
     AgentDiffPane, ConversationView, CopyThreadToClipboard, Follow, LoadThreadFromClipboard,
-    NewTerminalThread, NewThread, OpenActiveThreadAsMarkdown, OpenAgentDiff, OpenPrimeAgentData,
+    NewTerminalThread, NewThread, OpenActiveThreadAsMarkdown, OpenAgentDiff, OpenRubiksAgentData,
     RateSession, RenameSelectedThread, ResetFastModeWarnings, ResetTrialEndUpsell,
     ResetTrialUpsell, ShowAllSidebarThreadMetadata, ShowThreadMetadata, ToggleNewThreadMenu,
     ToggleOptionsMenu,
@@ -5820,7 +5820,7 @@ impl AgentPanel {
 
                         menu = menu
                             .action("Settings", Box::new(OpenSettings))
-                            .action("Prime Agent Data", Box::new(OpenPrimeAgentData))
+                            .action("Rubiks Agent Data", Box::new(OpenRubiksAgentData))
                             .action("Rate This Session…", Box::new(RateSession))
                             .separator()
                             .action("Toggle Threads Sidebar", Box::new(ToggleWorkspaceSidebar));
